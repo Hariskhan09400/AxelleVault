@@ -2,6 +2,10 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { Login } from './components/Login';
 import { SignUp } from './components/SignUp';
 import { Dashboard } from './components/Dashboard';
+import { Profile } from './components/Profile';
+import { Settings } from './components/Settings';
+import { ForgotPassword } from './components/ForgotPassword';
+import { ResetPassword } from './components/ResetPassword';
 import { useAuth } from './hooks/useAuth';
 import { ToastProvider } from './contexts/ToastContext';
 
@@ -34,12 +38,22 @@ const PublicOnly = ({ children }: { children: JSX.Element }) => {
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  return <Login onToggleMode={() => navigate('/signup')} />;
+  return (
+    <Login
+      onToggleMode={() => navigate('/signup')}
+      onForgotPassword={() => navigate('/forgot-password')}
+    />
+  );
 };
 
 const SignUpPage = () => {
   const navigate = useNavigate();
   return <SignUp onToggleMode={() => navigate('/login')} />;
+};
+
+const ForgotPage = () => {
+  const navigate = useNavigate();
+  return <ForgotPassword onBack={() => navigate('/login')} />;
 };
 
 // ─── App ─────────────────────────────────────────────────────────────────────
@@ -68,8 +82,33 @@ function App() {
           }
         />
 
+        {/* Forgot password — public only */}
+        <Route
+          path="/forgot-password"
+          element={
+            <PublicOnly>
+              <ForgotPage />
+            </PublicOnly>
+          }
+        />
+
+        {/* Reset password — no guard, user comes from email link */}
+        <Route
+          path="/reset-password"
+          element={<ResetPassword />}
+        />
+
         <Route
           path="/dashboard"
+          element={
+            <AuthGate>
+              <Dashboard />
+            </AuthGate>
+          }
+        />
+
+        <Route
+          path="/admin"
           element={
             <AuthGate>
               <Dashboard />
@@ -82,6 +121,24 @@ function App() {
           element={
             <AuthGate>
               <Dashboard />
+            </AuthGate>
+          }
+        />
+
+        <Route
+          path="/profile"
+          element={
+            <AuthGate>
+              <Profile />
+            </AuthGate>
+          }
+        />
+
+        <Route
+          path="/settings"
+          element={
+            <AuthGate>
+              <Settings />
             </AuthGate>
           }
         />

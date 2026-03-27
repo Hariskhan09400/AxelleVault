@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Activity, AlertTriangle, Shield, Clock, ScanLine } from 'lucide-react';
-import { supabase, SecurityLog } from '../lib/supabase';
+import { supabase, SecurityLog, ToolUsageHistory } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { calculateSecurityScore } from '../utils/securityTools';
 
@@ -10,6 +10,7 @@ export const SecurityDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [securityScore, setSecurityScore] = useState(50);
   const [totalScans, setTotalScans] = useState(0);
+  const [toolUsageHistory, setToolUsageHistory] = useState<ToolUsageHistory[]>([]);
 
   useEffect(() => {
     if (user) {

@@ -87,7 +87,7 @@ export const ForgotPassword = ({ onBack }: ForgotPasswordProps) => {
                 </div>
                 <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg px-4 py-3">
                   <p className="text-yellow-400/80 text-xs font-mono">
-                    ⚠️ LINK EXPIRES IN 1 HOUR
+                    ⚠️ LINK EXPIRES IN 15 MINUTES (SUPABASE AUTH EXPIRATION)
                   </p>
                 </div>
                 <button

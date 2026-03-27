@@ -19,6 +19,7 @@ export const SecurityAnalytics = () => {
     safeResults: 0,
     toolUsage: [],
   });
+  const [toolUsageHistory, setToolUsageHistory] = useState<Array<{id:string, tool_name:string, created_at:string}>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -63,6 +64,15 @@ export const SecurityAnalytics = () => {
           name: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
           count,
         }));
+
+        const { data: usageHistory } = await supabase
+          .from('tool_usage_history')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (usageHistory) setToolUsageHistory(usageHistory as any);
 
         setData({
           totalScans,
@@ -182,6 +192,24 @@ export const SecurityAnalytics = () => {
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
+
+      <div className="bg-gray-900/50 border border-cyan-500/30 rounded-lg p-6 shadow-lg">
+        <h4 className="text-lg font-semibold text-white mb-4">Recent Tool Usage</h4>
+        {toolUsageHistory.length === 0 ? (
+          <p className="text-gray-400">No tool usage history found yet.</p>
+        ) : (
+          <ul className="space-y-2 text-sm text-gray-200 max-h-60 overflow-y-auto">
+            {toolUsageHistory.map((row) => (
+              <li key={row.id} className="border border-gray-700 rounded p-2">
+                <div className="flex justify-between items-center">
+                  <span>{row.tool_name}</span>
+                  <span className="text-xs text-gray-400">{new Date(row.created_at).toLocaleString()}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

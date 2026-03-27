@@ -7,9 +7,10 @@ import { hasSupabaseEnv } from '../lib/supabase';
 
 interface LoginProps {
   onToggleMode: () => void;
+  onForgotPassword: () => void;
 }
 
-export const Login = ({ onToggleMode }: LoginProps) => {
+export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -152,7 +153,13 @@ export const Login = ({ onToggleMode }: LoginProps) => {
             </motion.button>
           </form>
 
-          <div className="mt-8 pt-6 border-t border-white/5 text-center">
+          <div className="mt-8 pt-6 border-t border-white/5 text-center space-y-2">
+            <button
+              onClick={onForgotPassword}
+              className="text-gray-400 hover:text-cyan-400 text-sm transition-all duration-300"
+            >
+              Forgot your access key? <span className="text-cyan-400 font-bold hover:underline underline-offset-4">Recover Account</span>
+            </button>
             <button
               onClick={onToggleMode}
               className="text-gray-400 hover:text-cyan-400 text-sm transition-all duration-300"

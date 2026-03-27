@@ -123,6 +123,90 @@ CREATE POLICY "Service role can manage blocked IPs"
   USING (true)
   WITH CHECK (true);
 
+-- Tool Usage History Table
+CREATE TABLE IF NOT EXISTS tool_usage_history (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  tool_name text NOT NULL,
+  input_data text,
+  result text,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE tool_usage_history ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own tool usage history"
+  ON tool_usage_history FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own tool usage history"
+  ON tool_usage_history FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+-- Encrypted Notes Table
+CREATE TABLE IF NOT EXISTS encrypted_notes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  encrypted_content text NOT NULL,
+  iv text NOT NULL,
+  salt text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE encrypted_notes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own encrypted notes"
+  ON encrypted_notes FOR ALL
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Vault PIN Hash Table
+CREATE TABLE IF NOT EXISTS vault_pins (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  pin_hash text NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(user_id)
+);
+
+ALTER TABLE vault_pins ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage own vault PIN"
+  ON vault_pins FOR ALL
+  TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- User Roles Table
+CREATE TABLE IF NOT EXISTS user_roles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  role text DEFAULT 'free' CHECK (role IN ('free', 'premium', 'admin')),
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own role"
+  ON user_roles FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Service role can insert/update roles"
+  ON user_roles FOR INSERT, UPDATE, DELETE
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Ensure each user has only one role record
+CREATE POLICY "User can maintain only one role row"
+  ON user_roles FOR INSERT, UPDATE
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id); 
+
 -- Create indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_security_logs_user_id ON security_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_security_logs_created_at ON security_logs(created_at DESC);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Globe, AlertTriangle, CheckCircle, Search, Shield } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, logToolUsage } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 
 interface ScanResult {
@@ -28,15 +28,43 @@ export const URLScanner = () => {
     try {
       const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
 
-      // Check HTTPS
+      const urlFormatted = urlObj.href;
+
+      // Try Google Safe Browsing API if key present
+      const safeBrowsingKey = import.meta.env.VITE_GOOGLE_SAFE_BROWSING_KEY;
+      if (safeBrowsingKey) {
+        const response = await fetch(
+          `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${safeBrowsingKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client: { clientId: 'axellevault', clientVersion: '1.0.0' },
+              threatInfo: {
+                threatTypes: ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE', 'POTENTIALLY_HARMFUL_APPLICATION'],
+                platformTypes: ['ANY_PLATFORM'],
+                threatEntryTypes: ['URL'],
+                threatEntries: [{ url: urlFormatted }],
+              },
+            }),
+          }
+        );
+
+        const json = await response.json();
+        if (json.matches && json.matches.length > 0) {
+          issues.push('URL flagged by Safe Browsing API');
+          recommendations.push('Avoid this URL and do not provide personal information');
+        }
+      }
+
+      // General checks
       if (urlObj.protocol !== 'https:') {
         issues.push('Not using HTTPS');
         recommendations.push('Use HTTPS for secure connections');
       }
 
-      // Check for suspicious keywords
       const suspiciousKeywords = ['login', 'verify', 'bank', 'paypal', 'secure', 'account', 'password', 'signin'];
-      const urlLower = url.toLowerCase();
+      const urlLower = urlFormatted.toLowerCase();
       const foundKeywords = suspiciousKeywords.filter(keyword => urlLower.includes(keyword));
 
       if (foundKeywords.length > 0) {
@@ -44,15 +72,12 @@ export const URLScanner = () => {
         recommendations.push('Verify the URL is legitimate before entering credentials');
       }
 
-      // Check domain length (long domains can be suspicious)
       if (urlObj.hostname.length > 50) {
         issues.push('Unusually long domain name');
         recommendations.push('Check for typos or malicious domains');
       }
 
-      // Mock additional checks
-      const mockSuspicious = urlLower.includes('fake') || urlLower.includes('test');
-      if (mockSuspicious) {
+      if (urlLower.includes('fake') || urlLower.includes('test')) {
         issues.push('Domain appears suspicious');
         recommendations.push('Avoid entering personal information');
       }
@@ -77,6 +102,7 @@ export const URLScanner = () => {
     setResult(scanResult);
 
     if (user) {
+      await logToolUsage(user.id, 'url-scanner', url, JSON.stringify(scanResult));
       await supabase.from('security_logs').insert({
         user_id: user.id,
         event_type: 'url_scan',

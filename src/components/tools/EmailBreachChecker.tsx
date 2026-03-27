@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Mail, AlertTriangle, CheckCircle, Search } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, logToolUsage } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
 
 interface BreachResult {
@@ -21,26 +21,62 @@ export const EmailBreachChecker = () => {
 
     setLoading(true);
 
-    // Mock breach check - in real app, use HaveIBeenPwned API
-    const mockBreachedEmails = ['breached@example.com', 'hacked@test.com', 'compromised@demo.com'];
-    const isBreached = mockBreachedEmails.includes(email.toLowerCase());
-    const breachCount = isBreached ? Math.floor(Math.random() * 5) + 1 : 0;
-
-    const mockResult: BreachResult = {
-      breached: isBreached,
-      breachCount,
-      lastBreach: isBreached ? '2023-12-15' : undefined,
-      warning: isBreached ? 'This email has been found in data breaches. Consider changing passwords and enabling 2FA.' : undefined,
+    const hibpKey = import.meta.env.VITE_HIBP_API_KEY;
+    let finalResult: BreachResult = {
+      breached: false,
+      breachCount: 0,
     };
 
-    setResult(mockResult);
+    if (hibpKey) {
+      try {
+        const res = await fetch(`https://haveibeenpwned.com/api/v3/breachedaccount/${encodeURIComponent(email)}?truncateResponse=false`, {
+          headers: {
+            'hibp-api-key': hibpKey,
+            'Accept': 'application/json',
+            'User-Agent': 'AxelleVault/1.0',
+          },
+        });
+
+        if (res.status === 404) {
+          finalResult = { breached: false, breachCount: 0 };
+        } else if (res.ok) {
+          const breaches = await res.json();
+          finalResult = {
+            breached: Array.isArray(breaches),
+            breachCount: Array.isArray(breaches) ? breaches.length : 0,
+            lastBreach: Array.isArray(breaches) ? breaches[0]?.BreachDate : undefined,
+            warning: Array.isArray(breaches) && breaches.length > 0 ? 'This email appears in one or more data breaches. Rotate affected secrets.' : undefined,
+          };
+        } else {
+          const text = await res.text();
+          throw new Error(`HIBP request failed (${res.status}): ${text}`);
+        }
+      } catch (err) {
+        setError((err as Error).message || 'Unable to query breach database');
+      }
+    } else {
+      // Fallback when API key is not set
+      const mockBreachedEmails = ['breached@example.com', 'hacked@test.com', 'compromised@demo.com'];
+      const isBreached = mockBreachedEmails.includes(email.toLowerCase());
+      const breachCount = isBreached ? Math.floor(Math.random() * 5) + 1 : 0;
+
+      finalResult = {
+        breached: isBreached,
+        breachCount,
+        lastBreach: isBreached ? '2023-12-15' : undefined,
+        warning: isBreached ? 'This email has been found in data breaches. Consider changing passwords and enabling 2FA.' : undefined,
+      };
+    }
+
+    setResult(finalResult);
 
     if (user) {
+      await logToolUsage(user.id, 'email-breach-checker', email, JSON.stringify(finalResult));
       await supabase.from('security_logs').insert({
         user_id: user.id,
         event_type: 'email_breach_check',
-        event_data: { email: email.toLowerCase(), breached: isBreached },
-        risk_level: isBreached ? 'high' : 'low',
+        event_data: { email: email.toLowerCase(), result: finalResult },
+        risk_level: finalResult.breached ? 'high' : 'low',
       });
     }
 

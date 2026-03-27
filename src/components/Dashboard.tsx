@@ -16,9 +16,15 @@ import {
   Lock,
   Brain,
   BarChart3,
+  FileText,
   AlertTriangle,
+  Settings as SettingsIcon,
 } from 'lucide-react';
+import { AdminPanel } from './AdminPanel';
+import { Profile } from './Profile';
+import { Settings } from './Settings';
 import { useAuth } from '../hooks/useAuth';
+import { useToast } from '../contexts/ToastContext';
 import { PasswordGenerator } from './tools/PasswordGenerator';
 import { PasswordAnalyzer } from './tools/PasswordAnalyzer';
 import { HashGenerator } from './tools/HashGenerator';
@@ -29,12 +35,24 @@ import { URLScanner } from './tools/URLScanner';
 import { WhoisLookup } from './tools/WhoisLookup';
 import { EncryptionTool } from './tools/EncryptionTool';
 import { ThreatDetection } from './tools/ThreatDetection';
+import { SecureNotesVault } from './tools/SecureNotesVault';
+import { PortScanner } from './tools/PortScanner';
+import { MalwareHashAnalyzer } from './tools/MalwareHashAnalyzer';
+import { APIKeyStrengthChecker } from './tools/APIKeyStrengthChecker';
+import { FileHashGenerator } from './tools/FileHashGenerator';
+import { DNSLookupTool } from './tools/DNSLookupTool';
+import { HTTPHeaderAnalyzer } from './tools/HTTPHeaderAnalyzer';
+import { JWTDecoderValidator } from './tools/JWTDecoderValidator';
+import { DarkWebExposureChecker } from './tools/DarkWebExposureChecker';
+import { SSLCertificateChecker } from './tools/SSLCertificateChecker';
 import { SecurityAnalytics } from './SecurityAnalytics';
 import { SecurityDashboard } from './SecurityDashboard';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 type Tool =
   | 'dashboard'
+  | 'profile'
+  | 'settings'
   | 'password-generator'
   | 'password-analyzer'
   | 'hash-generator'
@@ -95,13 +113,17 @@ const SignOutModal = ({
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 export const Dashboard = () => {
   const { user, profile, signOut } = useAuth();
+  const { showToast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
   const tools = [
     { id: 'dashboard' as Tool, name: 'Security Dashboard', icon: Activity, path: '/dashboard' },
+    { id: 'profile' as Tool, name: 'My Profile', icon: User, path: '/profile' },
+    { id: 'settings' as Tool, name: 'Settings', icon: SettingsIcon, path: '/settings' },
     { id: 'password-generator' as Tool, name: 'Password Generator', icon: Key, path: '/tools/password-generator' },
     { id: 'password-analyzer' as Tool, name: 'Password Analyzer', icon: Shield, path: '/tools/password-analyzer' },
     { id: 'hash-generator' as Tool, name: 'Hash Tools', icon: Hash, path: '/tools/hash-generator' },
@@ -111,17 +133,35 @@ export const Dashboard = () => {
     { id: 'url-scanner' as Tool, name: 'URL Scanner', icon: Search, path: '/tools/url-scanner' },
     { id: 'whois' as Tool, name: 'WHOIS Lookup', icon: Info, path: '/tools/whois' },
     { id: 'encryption' as Tool, name: 'Encryption Tool', icon: Lock, path: '/tools/encryption' },
+    { id: 'port-scanner' as Tool, name: 'Port Scanner', icon: Activity, path: '/tools/port-scanner' },
+    { id: 'malware-hash' as Tool, name: 'Malware Hash Analyzer', icon: Hash, path: '/tools/malware-hash' },
+    { id: 'apikey-strength' as Tool, name: 'API Key Strength Checker', icon: Key, path: '/tools/apikey-strength' },
+    { id: 'file-hash' as Tool, name: 'File Hash Generator', icon: Hash, path: '/tools/file-hash' },
+    { id: 'dns-lookup' as Tool, name: 'DNS Lookup', icon: Globe, path: '/tools/dns-lookup' },
+    { id: 'http-header' as Tool, name: 'HTTP Header Analyzer', icon: Shield, path: '/tools/http-header' },
+    { id: 'jwt-validator' as Tool, name: 'JWT Decoder/Validator', icon: Shield, path: '/tools/jwt-validator' },
+    { id: 'darkweb' as Tool, name: 'Dark Web Exposure', icon: AlertTriangle, path: '/tools/darkweb' },
+    { id: 'ssl-monitor' as Tool, name: 'SSL Certificate Checker', icon: Globe, path: '/tools/ssl-check' },
     { id: 'threat-detection' as Tool, name: 'AI Threat Detection', icon: Brain, path: '/tools/threat-detection' },
     { id: 'analytics' as Tool, name: 'Security Analytics', icon: BarChart3, path: '/analytics' },
+    { id: 'secure-notes' as Tool, name: 'Secure Notes Vault', icon: FileText, path: '/tools/secure-notes' },
   ];
 
   const activeTool =
     tools.find((tool) => tool.path === location.pathname)?.id ??
     (location.pathname.startsWith('/tools') ? 'password-generator' : 'dashboard');
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     setShowSignOutModal(false);
-    signOut();
+
+    try {
+      await signOut();
+      showToast('success', 'Successfully signed out.');
+      navigate('/login', { replace: true });
+    } catch (err) {
+      console.error('[Dashboard] signOut failed:', err);
+      showToast('error', 'Failed to sign out. Please try again.');
+    }
   };
 
   const renderTool = () => {
@@ -137,8 +177,21 @@ export const Dashboard = () => {
       case 'whois':              return <WhoisLookup />;
       case 'encryption':         return <EncryptionTool />;
       case 'threat-detection':   return <ThreatDetection />;
+      case 'port-scanner':       return <PortScanner />;
+      case 'malware-hash':       return <MalwareHashAnalyzer />;
+      case 'apikey-strength':    return <APIKeyStrengthChecker />;
+      case 'file-hash':          return <FileHashGenerator />;
+      case 'dns-lookup':         return <DNSLookupTool />;
+      case 'http-header':        return <HTTPHeaderAnalyzer />;
+      case 'jwt-validator':      return <JWTDecoderValidator />;
+      case 'darkweb':            return <DarkWebExposureChecker />;
+      case 'ssl-monitor':        return <SSLCertificateChecker />;
       case 'analytics':          return <SecurityAnalytics />;
-      default:                   return <SecurityDashboard />;
+      case 'secure-notes':       return <SecureNotesVault />;
+      case 'profile':            return <Profile />;
+      case 'settings':           return <Settings />;
+      case 'admin-panel':        return <AdminPanel />;
+      default:                  return <SecurityDashboard />;
     }
   };
 
@@ -302,6 +355,39 @@ export const Dashboard = () => {
                     {profile?.security_score || 50}/100
                   </p>
                 </div>
+              </div>
+
+              {/* User dropdown - desktop */}
+              <div className="hidden md:flex items-center relative">
+                <button
+                  onClick={() => setProfileMenuOpen((prev) => !prev)}
+                  className="flex items-center gap-2 bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2 text-gray-300 hover:text-white hover:bg-gray-700 transition"
+                >
+                  <User className="w-4 h-4" />
+                  <span className="text-xs font-medium">{profile?.username || user?.email?.split('@')[0] || 'Account'}</span>
+                </button>
+                {profileMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-44 bg-gray-900 border border-cyan-500/30 rounded-xl shadow-lg shadow-black/30 z-30">
+                    <button
+                      onClick={() => { setProfileMenuOpen(false); navigate('/profile'); }}
+                      className="w-full text-left px-4 py-2 hover:bg-cyan-500/10 text-white"
+                    >
+                      Profile
+                    </button>
+                    <button
+                      onClick={() => { setProfileMenuOpen(false); navigate('/settings'); }}
+                      className="w-full text-left px-4 py-2 hover:bg-cyan-500/10 text-white"
+                    >
+                      Settings
+                    </button>
+                    <button
+                      onClick={() => { setProfileMenuOpen(false); setShowSignOutModal(true); }}
+                      className="w-full text-left px-4 py-2 hover:bg-red-500/10 text-red-300"
+                    >
+                      Sign Out
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Mobile signout shortcut */}
