@@ -148,42 +148,26 @@ export const SecureNotesVault = () => {
   useEffect(() => {
     const checkPinStatus = async () => {
       setVaultLoading(true);
-      let timeoutId: NodeJS.Timeout | null = null;
-
       try {
         if (!user) {
           setPinExists(false);
-          setVaultLoading(false);
           return;
         }
 
-        // Set a timeout - if we don't get response in 5 seconds, assume no PIN
-        const timeoutPromise = new Promise((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error('Vault status check timeout'));
-          }, 5000);
-        });
+        const { data, error } = await fetchPinHash(user.id);
 
-        try {
-          const { data, error } = await Promise.race([
-            fetchPinHash(user.id),
-            timeoutPromise as Promise<any>,
-          ]);
-
-          if (error) {
-            console.error('[Vault] fetchPinHash error:', error.message);
-            setPinError('Unable to read vault status.');
-            setPinExists(false);
-          } else {
-            setPinExists(!!data?.pin_hash);
-          }
-        } catch (raceErr) {
-          console.error('[Vault] fetchPinHash race error:', raceErr);
-          setPinError('');
-          setPinExists(false); // Default: no PIN exists
+        if (error) {
+          console.error('[Vault] fetchPinHash error:', error.message);
+          setPinError('Unable to read vault status.');
+          setPinExists(false);
+        } else {
+          setPinExists(!!data?.pin_hash);
         }
+      } catch (err) {
+        console.error('[Vault] checkPinStatus exception', err);
+        setPinError('Unable to read vault status.');
+        setPinExists(false);
       } finally {
-        if (timeoutId) clearTimeout(timeoutId);
         setVaultLoading(false);
       }
     };
