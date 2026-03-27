@@ -1,13 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// ✅ CORRECT PROJECT — zrsesbenelfltrgalvrj
+const supabaseUrl = 'https://zrsesbenelfltrgalvrj.supabase.co';
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpyc2VzYmVuZWxmbHRyZ2FsdnJqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1NTM1ODcsImV4cCI6MjA5MDEyOTU4N30.J9gt7grtq0Lsnou3tdLjetv7RpO3bjUgwPtjfda7lQk';
 
-export const hasSupabaseEnv = Boolean(supabaseUrl && supabaseAnonKey);
-export const supabase = createClient(
-  supabaseUrl ?? 'https://placeholder.supabase.co',
-  supabaseAnonKey ?? 'placeholder-anon-key'
-);
+export const hasSupabaseEnv = true;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+  },
+});
 
 export interface UserProfile {
   id: string;

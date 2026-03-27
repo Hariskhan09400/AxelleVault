@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Key, Copy, RefreshCw, Check } from 'lucide-react';
 import { generatePassword, analyzePasswordStrength } from '../../utils/securityTools';
-import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../hooks/useAuth';
+import { saveLog } from '../../lib/securityLogger';
 
 export const PasswordGenerator = () => {
   const { user } = useAuth();
@@ -16,7 +16,7 @@ export const PasswordGenerator = () => {
   const [copied, setCopied] = useState(false);
   const [analysis, setAnalysis] = useState<ReturnType<typeof analyzePasswordStrength> | null>(null);
 
-  const generate = () => {
+  const generate = async () => {
     const newPassword = generatePassword(
       length,
       includeUppercase,
@@ -29,12 +29,7 @@ export const PasswordGenerator = () => {
     setAnalysis(analyzePasswordStrength(newPassword));
 
     if (user) {
-      supabase.from('security_logs').insert({
-        user_id: user.id,
-        event_type: 'password_generated',
-        event_data: { length, keyword: keyword ? 'yes' : 'no' },
-        risk_level: 'low',
-      });
+      await saveLog(user.id, 'password_generated', { length, keyword: keyword ? 'yes' : 'no' }, 'low');
     }
   };
 

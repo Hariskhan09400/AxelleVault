@@ -28,115 +28,60 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .select('*')
         .eq('id', userId)
         .maybeSingle();
-
-      if (error) {
-        console.error('[Auth] Error fetching profile:', error);
-        return;
-      }
-
+      if (error) { console.error('[Auth] fetchProfile error:', error.message); return; }
       setProfile(data ?? null);
       console.log('[Auth] Profile loaded:', data);
-    } catch (error) {
-      console.error('[Auth] Profile fetch exception:', error);
+    } catch (err) {
+      console.error('[Auth] fetchProfile exception:', err);
     }
   };
 
-  const refreshProfile = async () => {
-    if (user) {
-      await fetchProfile(user.id);
-    }
-  };
+  const refreshProfile = async () => { if (user) await fetchProfile(user.id); };
 
   useEffect(() => {
-    let isMounted = true;
-    const timeoutMs = 7000;
-
-    const init = async () => {
-      if (!hasSupabaseEnv) {
-        console.warn('[Auth] Supabase env missing. Skipping remote session initialization.');
-        if (isMounted) {
-          setUser(null);
-          setProfile(null);
-          setAuthError('Supabase environment is not configured.');
-          setLoading(false);
-        }
-        return;
-      }
-
-      try {
-        const sessionResult = await Promise.race([
-          supabase.auth.getSession(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Auth session timeout')), timeoutMs)
-          ),
-        ]);
-
-        if (!isMounted) return;
-
-        const sessionUser = sessionResult.data.session?.user ?? null;
-        console.log('[Auth] Initial session:', sessionUser ? sessionUser.email : 'none');
-
-        setUser(sessionUser);
-        if (sessionUser) {
-          await fetchProfile(sessionUser.id);
-        } else {
-          setProfile(null);
-        }
-        setAuthError(null);
-      } catch (error) {
-        console.error('[Auth] Session init failed:', error);
-        if (isMounted) {
-          setUser(null);
-          setProfile(null);
-          setAuthError('Failed to initialize authentication session.');
-        }
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-
-    init();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      console.log('[Auth] State changed:', _event, session?.user?.email ?? 'none');
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-      } else {
-        setProfile(null);
-      }
-      setAuthError(null);
+    if (!hasSupabaseEnv) {
+      setUser(null); setProfile(null);
+      setAuthError('Supabase environment is not configured.');
       setLoading(false);
-    });
+      return;
+    }
 
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
+    let isMounted = true;
+
+    // onAuthStateChange fires immediately with current session —
+    // removed getSession+timeout which was causing "Auth session timeout" error
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        console.log('[Auth] Event:', _event, session?.user?.email ?? 'none');
+        if (!isMounted) return;
+        const sessionUser = session?.user ?? null;
+        setUser(sessionUser);
+        if (sessionUser) await fetchProfile(sessionUser.id);
+        else setProfile(null);
+        setAuthError(null);
+        setLoading(false);
+      }
+    );
+
+    return () => { isMounted = false; subscription.unsubscribe(); };
   }, []);
 
   const signUp = async (email: string, password: string, username: string) => {
-    if (!hasSupabaseEnv) {
-      return { error: { message: 'Supabase environment is not configured.' } as AuthError };
-    }
+    if (!hasSupabaseEnv) return { error: { message: 'Supabase not configured.' } as AuthError };
 
     const normalizedEmail = email.trim().toLowerCase();
     const now = new Date().toISOString();
+
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
       password,
-      options: {
-        data: {
-          username,
-        },
-      },
+      options: { data: { username } },
     });
 
-    if (error || !data.user) {
-      return { error };
-    }
+    if (error) { console.error('[Auth] signUp error:', error.message); return { error }; }
+    if (!data.user) return { error: { message: 'Signup failed — no user returned.' } as AuthError };
+
+    console.log('[Auth] New user created:', data.user.id);
 
     const { error: profileError } = await supabase.from('user_profiles').upsert({
       id: data.user.id,
@@ -148,9 +93,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       failed_login_count: 0,
     });
 
-    if (profileError) {
-      console.error('Profile creation error:', profileError);
-    }
+    if (profileError) console.error('[Auth] Profile upsert error:', profileError.message);
+    else console.log('[Auth] Profile created for:', data.user.id);
 
     await supabase.from('security_logs').insert({
       user_id: data.user.id,
@@ -163,47 +107,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
-    if (!hasSupabaseEnv) {
-      return { error: { message: 'Supabase environment is not configured.' } as AuthError };
-    }
+    if (!hasSupabaseEnv) return { error: { message: 'Supabase not configured.' } as AuthError };
 
     const normalizedEmail = email.trim().toLowerCase();
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email: normalizedEmail,
       password,
     });
 
     if (error || !data.user) {
+      console.warn('[Auth] signIn failed:', error?.message);
       await supabase.from('login_attempts').insert({
-        email: normalizedEmail,
-        success: false,
+        email: normalizedEmail, success: false,
         attempt_time: new Date().toISOString(),
       });
       return { error };
     }
 
-    const { data: currentProfile } = await supabase
-      .from('user_profiles')
-      .select('total_logins')
-      .eq('id', data.user.id)
-      .maybeSingle();
+    const userId = data.user.id;
 
-    await supabase
-      .from('user_profiles')
-      .update({
-        last_login: new Date().toISOString(),
-        total_logins: (currentProfile?.total_logins ?? 0) + 1,
-      })
-      .eq('id', data.user.id);
+    const { data: currentProfile } = await supabase
+      .from('user_profiles').select('total_logins').eq('id', userId).maybeSingle();
+
+    const { error: updateError } = await supabase.from('user_profiles').upsert({
+      id: userId,
+      last_login: new Date().toISOString(),
+      total_logins: (currentProfile?.total_logins ?? 0) + 1,
+      failed_login_count: 0,
+    });
+
+    if (updateError) console.error('[Auth] Profile update error:', updateError.message);
+
+    await fetchProfile(userId);
 
     await supabase.from('login_attempts').insert({
-      email: normalizedEmail,
-      success: true,
+      email: normalizedEmail, success: true,
       attempt_time: new Date().toISOString(),
     });
 
     await supabase.from('security_logs').insert({
-      user_id: data.user.id,
+      user_id: userId,
       event_type: 'user_signin',
       event_data: { email: normalizedEmail },
       risk_level: 'low',
@@ -213,18 +157,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
-    if (!hasSupabaseEnv) {
-      setUser(null);
-      setProfile(null);
-      return;
-    }
-
+    if (!hasSupabaseEnv) { setUser(null); setProfile(null); return; }
     if (user) {
       await supabase.from('security_logs').insert({
-        user_id: user.id,
-        event_type: 'user_signout',
-        event_data: {},
-        risk_level: 'low',
+        user_id: user.id, event_type: 'user_signout',
+        event_data: {}, risk_level: 'low',
       });
     }
     await supabase.auth.signOut();
