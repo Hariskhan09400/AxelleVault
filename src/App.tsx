@@ -8,6 +8,7 @@ import { ForgotPassword } from './components/ForgotPassword';
 import { ResetPassword } from './components/ResetPassword';
 import { useAuth } from './hooks/useAuth';
 import { ToastProvider } from './contexts/ToastContext';
+import IPChat from './components/tools/ipchat';   // ← IPChat tool
 
 // ─── Route Guards ────────────────────────────────────────────────────────────
 
@@ -147,11 +148,22 @@ function App() {
           path="/tools"
           element={
             <AuthGate>
-              <Navigate to="/tools/password-generator" replace />
+              <Navigate to="/tools/ipchat" replace />
             </AuthGate>
           }
         />
 
+        {/* ── IPChat Tool — dedicated full-screen route ── */}
+        <Route
+          path="/tools/ipchat"
+          element={
+            <AuthGate>
+              <IPChat />
+            </AuthGate>
+          }
+        />
+
+        {/* All other tools → Dashboard with toolId param */}
         <Route
           path="/tools/:toolId"
           element={

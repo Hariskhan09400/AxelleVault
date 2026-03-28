@@ -48,6 +48,7 @@ import { SSLCertificateChecker } from './tools/SSLCertificateChecker';
 import { SecurityAnalytics } from './SecurityAnalytics';
 import { SecurityDashboard } from './SecurityDashboard';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 type Tool =
   | 'dashboard'
@@ -356,7 +357,7 @@ export const Dashboard = () => {
                   </p>
                 </div>
               </div>
-
+               <Link to="/tools/ipchat">IPChat</Link>
               {/* User dropdown - desktop */}
               <div className="hidden md:flex items-center relative">
                 <button
