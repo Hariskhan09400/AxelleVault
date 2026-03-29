@@ -799,6 +799,9 @@ export default function IPChat() {
               <span className="ipc-sep">·</span>
               <span className="ipc-dot" /> Unlimited users
             </div>
+            <div className="ipc-brand-footer">
+              crafted by <span className="ipc-brand-name">AxelleVault</span>
+            </div>
           </div>
         </div>
       )}
@@ -845,7 +848,10 @@ export default function IPChat() {
 
             <div className="ipc-sb-bottom">
               <button className="ipc-leave-btn" onClick={handleLeave}>← Leave Room</button>
-              <div className="ipc-ver">v3.0 // IPCHAT</div>
+              <div className="ipc-ver">
+                <span style={{color:'var(--tm)'}}>made by</span>
+                <span className="ipc-brand-tag"> AxelleVault</span>
+              </div>
             </div>
           </aside>
 
@@ -1038,6 +1044,8 @@ const CSS = `
   html, body { height:100%; margin:0; padding:0; overflow:hidden; }
   #root { height:100%; width:100%; }
 
+
+
   /* ── MOBILE VIEWPORT FIX ── */
   /* Use dvh (dynamic viewport height) — shrinks when keyboard opens */
   .ipc-chat-root {
@@ -1090,7 +1098,7 @@ const CSS = `
   }
   @keyframes ipcIn { from{opacity:0;transform:translateY(20px) scale(.98)} to{opacity:1;transform:none} }
 
-  .ipc-logo  { text-align:center; font-family:var(--sp); font-size:clamp(20px,5vw,28px); font-weight:700; letter-spacing:6px; margin-bottom:10px; }
+  .ipc-logo  { text-align:center; font-family:var(--sp); font-size:clamp(24px,5vw,34px); font-weight:700; letter-spacing:6px; margin-bottom:10px; }
   .ipc-br    { color:var(--td); }
   .ipc-lip   { color:var(--tx); }
   .ipc-lch   { color:var(--c); text-shadow:0 0 16px var(--c); }
@@ -1139,23 +1147,23 @@ const CSS = `
 
   /* ── SIDEBAR ── */
   .ipc-sidebar {
-    width:220px; min-width:220px; height:100%;
+    width:260px; min-width:260px; height:100%;
     background:var(--bg2); border-right:1px solid var(--bo);
     display:flex; flex-direction:column; flex-shrink:0; position:relative; z-index:20;
     transition:transform .3s cubic-bezier(.22,1,.36,1);
   }
-  .ipc-sidebar-logo { padding:18px 18px 14px; font-family:var(--sp); font-size:14px; font-weight:700; letter-spacing:4px; border-bottom:1px solid var(--bo); }
+  .ipc-sidebar-logo { padding:22px 20px 16px; font-family:var(--sp); font-size:17px; font-weight:700; letter-spacing:4px; border-bottom:1px solid var(--bo); }
   .ipc-room-box  { margin:12px 12px 0; background:rgba(0,212,255,.04); border:1px solid rgba(0,212,255,.12); border-radius:var(--ra); padding:12px 14px; }
-  .ipc-room-lbl  { font-family:var(--mo); font-size:9px; letter-spacing:2px; color:var(--tm); margin-bottom:5px; }
-  .ipc-room-ip   { font-family:var(--mo); font-size:12px; color:var(--c); letter-spacing:1px; margin-bottom:6px; word-break:break-all; }
-  .ipc-room-online { font-family:var(--mo); font-size:11px; color:var(--td); display:flex; align-items:center; gap:6px; }
+  .ipc-room-lbl  { font-family:var(--mo); font-size:11px; letter-spacing:2px; color:var(--tm); margin-bottom:6px; }
+  .ipc-room-ip   { font-family:var(--mo); font-size:15px; color:var(--c); letter-spacing:1px; margin-bottom:8px; word-break:break-all; }
+  .ipc-room-online { font-family:var(--mo); font-size:13px; color:var(--td); display:flex; align-items:center; gap:6px; }
   .ipc-pulse { width:7px; height:7px; background:var(--gr); border-radius:50%; display:inline-block; box-shadow:0 0 6px var(--gr); animation:ipcPulse 2s ease-in-out infinite; }
   @keyframes ipcPulse { 0%,100%{opacity:1;box-shadow:0 0 6px var(--gr)} 50%{opacity:.6;box-shadow:0 0 12px var(--gr)} }
 
   .ipc-members   { flex:1; overflow-y:auto; padding:12px 12px 0; scrollbar-width:thin; scrollbar-color:var(--bo) transparent; }
-  .ipc-mem-lbl   { font-family:var(--mo); font-size:9px; letter-spacing:2px; color:var(--tm); margin-bottom:8px; }
+  .ipc-mem-lbl   { font-family:var(--mo); font-size:11px; letter-spacing:2px; color:var(--tm); margin-bottom:10px; }
   .ipc-mem-list  { list-style:none; display:flex; flex-direction:column; gap:3px; }
-  .ipc-mem-item  { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:4px; font-family:var(--mo); font-size:12px; color:var(--tx); animation:ipcMemIn .3s ease both; }
+  .ipc-mem-item  { display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:4px; font-family:var(--mo); font-size:14px; color:var(--tx); animation:ipcMemIn .3s ease both; }
   @keyframes ipcMemIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:none} }
   .ipc-mem-item:hover { background:rgba(255,255,255,.03); }
   .ipc-mem-dot   { width:7px; height:7px; background:var(--gr); border-radius:50%; box-shadow:0 0 5px var(--gr); flex-shrink:0; }
@@ -1170,8 +1178,8 @@ const CSS = `
   /* ── MAIN ── */
   .ipc-main { flex:1; display:flex; flex-direction:column; height:100%; overflow:hidden; position:relative; z-index:5; min-width:0; }
 
-  .ipc-header { height:56px; background:var(--bg2); border-bottom:1px solid var(--bo); display:flex; align-items:center; justify-content:space-between; padding:0 16px; flex-shrink:0; gap:10px; }
-  .ipc-hroom  { font-family:var(--mo); font-size:13px; display:flex; align-items:center; gap:8px; flex:1; min-width:0; overflow:hidden; }
+  .ipc-header { height:64px; background:var(--bg2); border-bottom:1px solid var(--bo); display:flex; align-items:center; justify-content:space-between; padding:0 20px; flex-shrink:0; gap:10px; }
+  .ipc-hroom  { font-family:var(--mo); font-size:16px; display:flex; align-items:center; gap:8px; flex:1; min-width:0; overflow:hidden; }
   .ipc-hpre   { color:var(--tm); letter-spacing:1px; flex-shrink:0; }
   .ipc-hid    { color:var(--c); letter-spacing:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ipc-hactions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
@@ -1180,7 +1188,7 @@ const CSS = `
   .ipc-allclear-btn { border-color:rgba(0,212,255,.25) !important; color:var(--cd) !important; }
   .ipc-allclear-btn:hover { border-color:var(--c) !important; color:var(--c) !important; background:rgba(0,212,255,.06) !important; }
   .ipc-clear-label { display:inline; }
-  .ipc-badge  { display:flex; align-items:center; gap:6px; font-family:var(--mo); font-size:12px; color:var(--tx); background:var(--bg3); border:1px solid var(--bo); border-radius:4px; padding:5px 12px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ipc-badge  { display:flex; align-items:center; gap:6px; font-family:var(--mo); font-size:14px; color:var(--tx); background:var(--bg3); border:1px solid var(--bo); border-radius:4px; padding:5px 12px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ipc-badge-dot { width:6px; height:6px; background:var(--gr); border-radius:50%; box-shadow:0 0 6px var(--gr); flex-shrink:0; }
 
   /* ── MESSAGES ── */
@@ -1188,7 +1196,7 @@ const CSS = `
   .ipc-msgs::-webkit-scrollbar { width:4px; }
   .ipc-msgs::-webkit-scrollbar-thumb { background:var(--bo); border-radius:2px; }
 
-  .ipc-sys { align-self:center; font-family:var(--mo); font-size:10px; color:var(--tm); letter-spacing:.5px; padding:5px 14px; background:rgba(255,255,255,.02); border:1px solid var(--bo); border-radius:20px; text-align:center; animation:ipcMsgIn .25s ease both; margin:8px 0; }
+  .ipc-sys { align-self:center; font-family:var(--mo); font-size:12px; color:var(--tm); letter-spacing:.5px; padding:5px 14px; background:rgba(255,255,255,.02); border:1px solid var(--bo); border-radius:20px; text-align:center; animation:ipcMsgIn .25s ease both; margin:8px 0; }
   .ipc-sys-join  { color:rgba(0,255,136,.7);  border-color:rgba(0,255,136,.15); }
   .ipc-sys-leave { color:rgba(255,68,102,.7); border-color:rgba(255,68,102,.12); }
   .ipc-sys-clear { color:rgba(0,212,255,.6);  border-color:rgba(0,212,255,.12); }
@@ -1212,8 +1220,8 @@ const CSS = `
 
   .ipc-mmeta { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
   /* [1] Bigger username font */
-  .ipc-muser { font-family:var(--sa); font-size:13px; font-weight:600; color:var(--cd); letter-spacing:.8px; }
-  .ipc-mtime { font-family:var(--mo); font-size:10px; color:var(--tm); }
+  .ipc-muser { font-family:var(--mo); font-size:13px; font-weight:400; color:var(--cd); letter-spacing:.5px; }
+  .ipc-mtime { font-family:var(--mo); font-size:12px; color:var(--tm); }
 
   /* ── REPLY HINT BUTTON ── */
   .ipc-reply-hint {
@@ -1253,16 +1261,16 @@ const CSS = `
 
   /* ── BUBBLES — bigger, Rajdhani forced ── */
   .ipc-bubble {
-    padding:14px 22px !important;
-    border-radius:22px !important;
-    font-family:'Rajdhani', 'Segoe UI', sans-serif !important;
-    font-size:18px !important;
-    font-weight:500 !important;
-    line-height:1.6 !important;
-    letter-spacing:0.25px !important;
+    padding:13px 20px !important;
+    border-radius:20px !important;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;
+    font-size:20px !important;
+    font-weight:400 !important;
+    line-height:1.5 !important;
+    letter-spacing:0px !important;
     max-width:100%;
     word-break:break-word;
-    min-width:80px;
+    min-width:60px;
     width:fit-content;
     display:block;
   }
@@ -1357,71 +1365,118 @@ const CSS = `
   @keyframes ipcTyping { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-4px)} }
 
   /* ── INPUT BAR ── */
-  .ipc-bar { height:68px; background:var(--bg2); border-top:1px solid var(--bo); display:flex; align-items:center; gap:10px; padding:0 14px; flex-shrink:0; }
-  .ipc-attach { width:40px; height:40px; min-width:40px; background:transparent; border:1px solid var(--bo); border-radius:var(--ra); color:var(--td); cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .2s; }
+  .ipc-bar { height:78px; background:var(--bg2); border-top:1px solid var(--bo); display:flex; align-items:center; gap:12px; padding:0 18px; flex-shrink:0; }
+  .ipc-attach { width:46px; height:46px; min-width:46px; background:transparent; border:1px solid var(--bo); border-radius:var(--ra); color:var(--td); cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .2s; }
   .ipc-attach:hover { border-color:var(--c); color:var(--c); background:var(--cg); }
   /* [1] bigger input font — forced */
   .ipc-msg-in {
     flex:1; background:var(--bg3); border:1px solid var(--bo); border-radius:24px;
     color:var(--tx) !important;
-    font-family:'Rajdhani', 'Segoe UI', sans-serif !important;
-    font-size:18px !important;
-    font-weight:500 !important;
-    letter-spacing:0.25px;
-    padding:12px 20px; outline:none;
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;
+    font-size:20px !important;
+    font-weight:400 !important;
+    letter-spacing:0px;
+    padding:11px 18px; outline:none;
     transition:border-color .2s,box-shadow .2s; min-width:0;
   }
-  .ipc-msg-in::placeholder { color:var(--tm); font-size:16px; font-family:'Rajdhani', sans-serif; }
+  .ipc-msg-in::placeholder { color:var(--tm); font-size:14px; }
   .ipc-msg-in:focus { border-color:var(--cd); box-shadow:0 0 0 3px var(--cg); }
-  .ipc-send { position:relative; width:44px; height:44px; min-width:44px; background:#7c5cfc; border:none; border-radius:50%; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden; transition:transform .15s,box-shadow .2s,background .2s; }
+  .ipc-send { position:relative; width:50px; height:50px; min-width:50px; background:#7c5cfc; border:none; border-radius:50%; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden; transition:transform .15s,box-shadow .2s,background .2s; }
   .ipc-send:hover { background:#9b7ffe; transform:scale(1.08); box-shadow:0 0 20px rgba(124,92,252,.5); }
   .ipc-send:active { transform:scale(.96); }
   .ipc-send-glow { position:absolute; inset:0; background:linear-gradient(135deg,rgba(255,255,255,.2),transparent 60%); pointer-events:none; }
 
   /* ── CONFIRM MODAL (smaller) ── */
   .ipc-confirm-modal {
-    max-width:340px !important;
-    padding:28px 24px !important;
+    max-width:360px !important;
+    padding:32px 28px !important;
   }
-  .ipc-confirm-modal .ipc-modal-icon { font-size:28px; margin-bottom:8px; }
+  .ipc-confirm-modal .ipc-modal-icon { font-size:30px; margin-bottom:10px; }
   .ipc-confirm-modal .ipc-modal-title { font-size:13px; }
-  .ipc-confirm-modal .ipc-modal-body { font-size:14px; margin-bottom:16px; }
+  .ipc-confirm-modal .ipc-modal-body { font-size:15px; margin-bottom:20px; }
 
-  /* ── VOTE MODAL ── */
+  /* ── ALL MODALS — backdrop + card ── */
   .ipc-modal-backdrop {
-    position:fixed; inset:0; z-index:800;
-    background:rgba(0,0,0,.75); backdrop-filter:blur(6px);
+    position:fixed; inset:0; z-index:900;
+    /* Solid enough to see modal clearly on dark bg */
+    background:rgba(2,6,18,0.88);
+    backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
     display:flex; align-items:center; justify-content:center;
+    padding:20px;
     animation:ipcIn .2s ease both;
   }
   .ipc-modal {
-    background:var(--bg2); border:1px solid var(--bo2);
-    border-radius:14px; padding:32px 28px;
-    max-width:380px; width:92vw;
-    box-shadow:0 0 0 1px rgba(0,212,255,.06), 0 24px 80px rgba(0,0,0,.7);
+    /* Solid dark card — no transparency blending with chat bg */
+    background:#0f1829;
+    border:1px solid rgba(0,212,255,0.35);
+    border-radius:18px;
+    padding:36px 32px;
+    max-width:400px; width:92vw;
+    /* Strong glow so it pops on any bg */
+    box-shadow:
+      0 0 0 1px rgba(0,212,255,0.15),
+      0 0 40px rgba(0,212,255,0.12),
+      0 32px 80px rgba(0,0,0,0.9);
     text-align:center;
-    animation:ipcIn .25s cubic-bezier(.22,1,.36,1) both;
+    animation:ipcIn .3s cubic-bezier(.22,1,.36,1) both;
+    position:relative;
   }
-  .ipc-modal-icon  { font-size:34px; margin-bottom:10px; }
-  .ipc-modal-title { font-family:var(--sp); font-size:15px; letter-spacing:3px; color:var(--c); text-transform:uppercase; margin-bottom:12px; }
-  .ipc-modal-body  { font-family:var(--sa); font-size:16px; color:var(--tx); line-height:1.6; margin-bottom:18px; }
-  .ipc-modal-body strong { color:var(--c); }
-  .ipc-modal-votes { display:flex; gap:14px; justify-content:center; margin-bottom:22px; font-family:var(--mo); font-size:12px; flex-wrap:wrap; }
-  .ipc-vote-accept { color:var(--gr); }
-  .ipc-vote-reject { color:var(--re); }
-  .ipc-vote-total  { color:var(--tm); }
+  /* Top accent line */
+  .ipc-modal::before {
+    content:'';
+    position:absolute; top:0; left:10%; right:10%; height:2px;
+    background:linear-gradient(90deg,transparent,rgba(0,212,255,0.6),transparent);
+    border-radius:2px;
+  }
+  .ipc-modal-icon  { font-size:36px; margin-bottom:12px; }
+  .ipc-modal-title {
+    font-family:var(--sp); font-size:13px; letter-spacing:4px;
+    color:var(--c); text-transform:uppercase; margin-bottom:14px;
+    text-shadow:0 0 12px rgba(0,212,255,0.5);
+  }
+  .ipc-modal-body  {
+    font-family:var(--sa); font-size:16px; font-weight:500;
+    color:#c8d8f0; line-height:1.65; margin-bottom:22px;
+  }
+  .ipc-modal-body strong { color:#fff; font-weight:700; }
+  .ipc-modal-votes {
+    display:flex; gap:16px; justify-content:center; margin-bottom:24px;
+    font-family:var(--mo); font-size:12px; flex-wrap:wrap;
+    background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06);
+    border-radius:8px; padding:10px 16px;
+  }
+  .ipc-vote-accept { color:#00ff88; font-weight:700; }
+  .ipc-vote-reject { color:#ff4466; font-weight:700; }
+  .ipc-vote-total  { color:#5a7090; }
   .ipc-modal-btns  { display:flex; gap:12px; justify-content:center; }
   .ipc-modal-btn {
-    flex:1; max-width:140px;
-    border:none; border-radius:8px; padding:12px 20px;
-    font-family:var(--sp); font-size:12px; font-weight:700;
+    flex:1; max-width:150px;
+    border:none; border-radius:10px; padding:13px 20px;
+    font-family:var(--sp); font-size:11px; font-weight:700;
     letter-spacing:2px; cursor:pointer; transition:all .2s;
+    min-height:46px;
   }
-  .ipc-btn-accept { background:var(--gr); color:#060e1a; }
-  .ipc-btn-accept:hover { background:#44ffaa; box-shadow:0 0 18px rgba(0,255,136,.4); }
-  .ipc-btn-reject { background:var(--re); color:#fff; }
-  .ipc-btn-reject:hover { background:#ff6680; box-shadow:0 0 18px rgba(255,68,102,.4); }
-  .ipc-modal-voted { font-family:var(--sa); font-size:16px; color:var(--td); }
+  .ipc-btn-accept { background:#00ff88; color:#030a06; box-shadow:0 0 20px rgba(0,255,136,0.3); }
+  .ipc-btn-accept:hover { background:#33ffaa; box-shadow:0 0 24px rgba(0,255,136,.5); transform:translateY(-1px); }
+  .ipc-btn-reject { background:rgba(255,68,102,0.15); color:#ff6680; border:1px solid rgba(255,68,102,0.4); }
+  .ipc-btn-reject:hover { background:rgba(255,68,102,0.25); box-shadow:0 0 18px rgba(255,68,102,.3); color:#fff; }
+  .ipc-modal-voted { font-family:var(--sa); font-size:16px; color:#a0b4d0; }
+  /* ── BRANDING ── */
+  .ipc-brand-tag {
+    font-family:var(--sp); font-size:9px; letter-spacing:1.5px;
+    color:var(--c); text-shadow:0 0 8px rgba(0,212,255,0.5);
+    font-weight:700;
+  }
+  .ipc-brand-footer {
+    text-align:center; margin-top:14px;
+    font-family:var(--mo); font-size:9.5px; color:var(--tm);
+    letter-spacing:0.5px;
+  }
+  .ipc-brand-name {
+    color:var(--c); font-weight:700; letter-spacing:1px;
+    text-shadow:0 0 8px rgba(0,212,255,0.4);
+  }
   .ipc-modal-voted strong { color:var(--tx); }
   .ipc-voted-yes { color:var(--gr) !important; }
   .ipc-voted-no  { color:var(--re) !important; }
@@ -1531,7 +1586,7 @@ const CSS = `
     /* Messages */
     .ipc-mwrap { max-width:88%; }
     .ipc-img-bubble { max-width:210px; }
-    .ipc-bubble { font-size:16px !important; padding:11px 16px !important; }
+    .ipc-bubble { font-size:20px !important; padding:13px 20px !important; }
 
     /* Header */
     .ipc-clear-label { display:none; }
@@ -1545,7 +1600,7 @@ const CSS = `
 
   /* Extra small phones */
   @media (max-width: 380px) {
-    .ipc-msg-in { font-size:16px !important; padding:8px 12px !important; }
+    .ipc-msg-in { font-size:20px !important; padding:12px 18px !important; }
     .ipc-bubble { font-size:15px !important; }
   }
 `;
