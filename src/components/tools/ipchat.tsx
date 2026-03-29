@@ -1,5 +1,5 @@
 /**
- * ipchat.tsx — UPGRADED v2.2
+ * ipchat.tsx — UPGRADED v3.0
  * ─────────────────────────────────────────────────────
  * Real-time IP-based chat using Supabase Realtime
  * • NO backend server needed
@@ -8,7 +8,12 @@
  * • Mobile-friendly responsive layout (hamburger sidebar)
  * • Image upload via base64 broadcast (ephemeral, no storage)
  * • Full screen fix (100vh, position fixed)
- * • Big readable bubbles — purple self, dark other
+ *
+ * v3.0 UPGRADES:
+ * [1] Bigger fonts, readable bubbles, Rajdhani with better letter-spacing
+ * [2] Instagram-style reply — double-click or swipe to reply
+ * [3] Delete for Everyone on own messages
+ * [4] All-Clear Voting System — modal vote, unanimous = restart
  * ─────────────────────────────────────────────────────
  */
 
@@ -28,6 +33,13 @@ const supabase = createClient(
 );
 
 // ── Types ───────────────────────────────────────────────────
+interface ReplyPreview {
+  id: string;
+  username: string;
+  text: string;
+  image?: string;
+}
+
 interface ChatMessage {
   id: string;
   type: 'message' | 'system';
@@ -37,12 +49,20 @@ interface ChatMessage {
   timestamp: number;
   isSelf?: boolean;
   systemKind?: 'join' | 'leave' | 'clear' | 'info';
+  replyTo?: ReplyPreview;
+  deleted?: boolean;
 }
 
 interface RoomUser {
   username: string;
   joinedAt: number;
   presenceKey: string;
+}
+
+interface ClearVoteState {
+  requestedBy: string;
+  votes: Record<string, 'accept' | 'reject'>;
+  totalMembers: number;
 }
 
 type Screen = 'join' | 'chat';
@@ -113,6 +133,19 @@ export default function IPChat() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploadError, setUploadError]   = useState('');
 
+  // ── REPLY STATE ──────────────────────────────────────────
+  const [replyingTo, setReplyingTo]     = useState<ReplyPreview | null>(null);
+
+  // ── CONTEXT MENU (delete) ────────────────────────────────
+  const [ctxMenu, setCtxMenu] = useState<{ msgId: string; x: number; y: number } | null>(null);
+
+  // ── CLEAR VOTE STATE ─────────────────────────────────────
+  const [clearVote, setClearVote]               = useState<ClearVoteState | null>(null);
+  const [myVote, setMyVote]                     = useState<'accept' | 'reject' | null>(null);
+  const [showVoteModal, setShowVoteModal]       = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showAllClearConfirm, setShowAllClearConfirm] = useState(false);
+
   const myUsername  = useRef('');
   const myRoom      = useRef('');
   const presenceKey = useRef(uid());
@@ -121,6 +154,13 @@ export default function IPChat() {
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTyping    = useRef(false);
   const fileRef     = useRef<HTMLInputElement>(null);
+  const msgRefs     = useRef<Record<string, HTMLDivElement | null>>({});
+  const touchStartX  = useRef<Record<string, number>>({});
+  const membersRef   = useRef<RoomUser[]>([]);
+  const prevVotesRef = useRef<string>('');
+
+  // keep membersRef in sync
+  useEffect(() => { membersRef.current = members; }, [members]);
 
   const scrollBottom = useCallback(() => {
     setTimeout(() => messagesEnd.current?.scrollIntoView({ behavior: 'smooth' }), 40);
@@ -134,6 +174,47 @@ export default function IPChat() {
     if (channelRef.current) {
       await supabase.removeChannel(channelRef.current);
       channelRef.current = null;
+    }
+  }, []);
+
+  // ── SCROLL TO QUOTED MSG ─────────────────────────────────
+  const scrollToMsg = useCallback((id: string) => {
+    const el = msgRefs.current[id];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ipc-msg-highlight');
+      setTimeout(() => el.classList.remove('ipc-msg-highlight'), 1500);
+    }
+  }, []);
+
+  // ── REPLY TRIGGER (double-click) ─────────────────────────
+  const handleDoubleClick = useCallback((msg: ChatMessage) => {
+    if (msg.type !== 'message' || msg.deleted) return;
+    setReplyingTo({
+      id: msg.id,
+      username: msg.username ?? '',
+      text: msg.text,
+      image: msg.image,
+    });
+  }, []);
+
+  // ── SWIPE TO REPLY (touch) ───────────────────────────────
+  const handleTouchStart = useCallback((msgId: string, e: React.TouchEvent) => {
+    touchStartX.current[msgId] = e.touches[0].clientX;
+  }, []);
+
+  const handleTouchEnd = useCallback((msg: ChatMessage, e: React.TouchEvent) => {
+    const startX = touchStartX.current[msg.id] ?? 0;
+    const endX   = e.changedTouches[0].clientX;
+    const diff   = endX - startX;
+    // swipe right ≥ 60px to reply (works for both sides)
+    if (Math.abs(diff) >= 60 && msg.type === 'message' && !msg.deleted) {
+      setReplyingTo({
+        id: msg.id,
+        username: msg.username ?? '',
+        text: msg.text,
+        image: msg.image,
+      });
     }
   }, []);
 
@@ -168,7 +249,7 @@ export default function IPChat() {
       setMembers(users);
     });
 
-    channel.on('presence', { event: 'join' }, ({ key, newPresences }: any) => {
+    channel.on('presence', { event: 'join' }, ({ newPresences }: any) => {
       const uName = newPresences[0]?.username;
       if (uName && uName !== myUsername.current) {
         addMsg({ id: uid(), type: 'system', text: `${uName} joined the room`, timestamp: Date.now(), systemKind: 'join' });
@@ -176,7 +257,7 @@ export default function IPChat() {
       }
     });
 
-    channel.on('presence', { event: 'leave' }, ({ key, leftPresences }: any) => {
+    channel.on('presence', { event: 'leave' }, ({ leftPresences }: any) => {
       const uName = leftPresences[0]?.username;
       if (uName) {
         addMsg({ id: uid(), type: 'system', text: `${uName} left the room`, timestamp: Date.now(), systemKind: 'leave' });
@@ -185,19 +266,25 @@ export default function IPChat() {
       }
     });
 
+    // ── BROADCAST: message ──────────────────────────────
+    // Apne messages locally already add ho chuke hain (handleSend mein)
+    // Sirf dusron ke messages add karo
     channel.on('broadcast', { event: 'message' }, ({ payload }: any) => {
+      if (payload.username === myUsername.current) return; // skip own
       addMsg({
-        id: uid(),
+        id: payload.id ?? uid(),
         type: 'message',
         username: payload.username,
         text: payload.text,
         image: payload.image,
         timestamp: payload.timestamp,
-        isSelf: payload.username === myUsername.current,
+        isSelf: false,
+        replyTo: payload.replyTo ?? undefined,
       });
       scrollBottom();
     });
 
+    // ── BROADCAST: typing ───────────────────────────────
     channel.on('broadcast', { event: 'typing' }, ({ payload }: any) => {
       if (payload.username === myUsername.current) return;
       setTypingUsers(prev => {
@@ -207,12 +294,66 @@ export default function IPChat() {
       });
     });
 
+    // ── BROADCAST: clear (legacy instant clear) ─────────
     channel.on('broadcast', { event: 'clear' }, ({ payload }: any) => {
       setMessages([{
         id: uid(), type: 'system',
         text: `${payload.username} cleared the chat`,
         timestamp: Date.now(), systemKind: 'clear',
       }]);
+      scrollBottom();
+    });
+
+    // ── BROADCAST: delete_single ────────────────────────
+    channel.on('broadcast', { event: 'delete_single' }, ({ payload }: any) => {
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === payload.msgId
+            ? { ...m, deleted: true, text: 'This message was deleted.', image: undefined, replyTo: undefined }
+            : m
+        )
+      );
+    });
+
+    // ── BROADCAST: request_all_clear ────────────────────
+    // NOTE: Supabase sender ko deliver nahi karta — requester ka state
+    // handleRequestAllClear mein locally set hota hai
+    channel.on('broadcast', { event: 'request_all_clear' }, ({ payload }: any) => {
+      // Sirf non-requesters yahan pahunchte hain
+      const totalOthers = membersRef.current.length - 1;
+      setClearVote({
+        requestedBy: payload.requestedBy,
+        votes: { [payload.requestedBy]: 'accept' }, // requester auto-accept
+        totalMembers: totalOthers,
+      });
+      setMyVote(null);
+      setShowVoteModal(true);
+    });
+
+    // ── BROADCAST: all_clear_vote ───────────────────────
+    // Sirf votes update karo — majority check useEffect mein hoga
+    channel.on('broadcast', { event: 'all_clear_vote' }, ({ payload }: any) => {
+      setClearVote(prev => {
+        if (!prev) return prev;
+        return { ...prev, votes: { ...prev.votes, [payload.username]: payload.vote } };
+      });
+    });
+
+    // ── BROADCAST: force_clear_all ──────────────────────
+    // Receivers (non-requester) — complete fresh reset
+    channel.on('broadcast', { event: 'force_clear_all' }, ({ payload }: any) => {
+      const { requestedBy, acceptCount, rejectCount } = payload;
+      const summary = acceptCount != null ? ` (${acceptCount} accept, ${rejectCount} reject)` : '';
+      setMessages([{
+        id: uid(), type: 'system',
+        text: `— Fresh start by ${requestedBy}${summary} —`,
+        timestamp: Date.now(), systemKind: 'clear',
+      }]);
+      setShowVoteModal(false);
+      setClearVote(null);
+      setMyVote(null);
+      setReplyingTo(null);
+      setImagePreview(null);
       scrollBottom();
     });
 
@@ -232,25 +373,49 @@ export default function IPChat() {
   }, [username, roomId, addMsg, scrollBottom, cleanup]);
 
   // ── SEND ─────────────────────────────────────────────────
+  // Supabase broadcast apne sender ko deliver NAHI karta
+  // isliye apna message locally turant add karo
   const handleSend = useCallback(async () => {
     const msg = sanitize(msgInput);
     if ((!msg && !imagePreview) || !channelRef.current) return;
 
+    const msgId  = uid();
+    const ts     = Date.now();
+    const imgVal = imagePreview ?? undefined;
+    const rTo    = replyingTo ?? undefined;
+
+    // Locally apna message turant dikhao
+    addMsg({
+      id: msgId,
+      type: 'message',
+      username: myUsername.current,
+      text: msg,
+      image: imgVal,
+      timestamp: ts,
+      isSelf: true,
+      replyTo: rTo,
+    });
+    scrollBottom();
+
+    // Baaki members ko broadcast karo
     await channelRef.current.send({
       type: 'broadcast',
       event: 'message',
       payload: {
+        id: msgId,
         username: myUsername.current,
         text: msg,
-        image: imagePreview ?? undefined,
-        timestamp: Date.now(),
+        image: imgVal,
+        timestamp: ts,
+        replyTo: rTo,
       },
     });
 
     setMsgInput('');
     setImagePreview(null);
+    setReplyingTo(null);
     stopTyping();
-  }, [msgInput, imagePreview]);
+  }, [msgInput, imagePreview, replyingTo, addMsg, scrollBottom]);
 
   // ── IMAGE PICK ────────────────────────────────────────────
   const handleFileChange = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
@@ -293,15 +458,110 @@ export default function IPChat() {
     typingTimer.current = setTimeout(stopTyping, 2000);
   }, [stopTyping]);
 
-  // ── CLEAR ─────────────────────────────────────────────────
-  const handleClear = useCallback(async () => {
+  // ── DELETE FOR EVERYONE ───────────────────────────────────
+  const handleDeleteForEveryone = useCallback(async (msgId: string) => {
     if (!channelRef.current) return;
-    if (!window.confirm('Clear chat for everyone in this room?')) return;
     await channelRef.current.send({
-      type: 'broadcast', event: 'clear',
-      payload: { username: myUsername.current },
+      type: 'broadcast', event: 'delete_single',
+      payload: { msgId },
+    });
+    setCtxMenu(null);
+  }, []);
+
+  // ── ALL CLEAR REQUEST (voting) ────────────────────────────
+  const handleRequestAllClear = useCallback(async () => {
+    if (!channelRef.current) return;
+    // Requester ka state locally set karo — Supabase broadcast sender ko deliver nahi karta
+    const totalOthers = membersRef.current.length - 1;
+    setClearVote({
+      requestedBy: myUsername.current,
+      votes: { [myUsername.current]: 'accept' }, // requester auto-accept
+      totalMembers: totalOthers,
+    });
+    setMyVote('accept');
+    setShowVoteModal(false);
+    // Baaki members ko broadcast karo
+    await channelRef.current.send({
+      type: 'broadcast', event: 'request_all_clear',
+      payload: { requestedBy: myUsername.current },
     });
   }, []);
+
+  // ── CAST VOTE ─────────────────────────────────────────────
+  const castVote = useCallback(async (vote: 'accept' | 'reject') => {
+    if (!channelRef.current || myVote) return;
+    setMyVote(vote);
+    // Local state update — voter apna vote local mein set kare
+    setClearVote(prev => {
+      if (!prev) return prev;
+      return { ...prev, votes: { ...prev.votes, [myUsername.current]: vote } };
+    });
+    // Broadcast to room — Supabase sender ko deliver nahi karta
+    // isliye voter apne liye manually checkMajority chalayega (useEffect se)
+    await channelRef.current.send({
+      type: 'broadcast', event: 'all_clear_vote',
+      payload: { username: myUsername.current, vote },
+    });
+  }, [myVote]);
+
+  // ── MAJORITY CHECK (voter side) ────────────────────────────
+  // Supabase apne broadcast sender ko deliver nahi karta
+  // isliye jab clearVote.votes change ho, har client majority check kare
+  useEffect(() => {
+    if (!clearVote) return;
+    const votesKey = JSON.stringify(clearVote.votes);
+    if (votesKey === prevVotesRef.current) return;
+    prevVotesRef.current = votesKey;
+
+    const otherUsernames = membersRef.current
+      .map(m => m.username)
+      .filter(u => u !== clearVote.requestedBy);
+
+    const castedVotes = otherUsernames
+      .map(u => clearVote.votes[u])
+      .filter((v): v is string => v === 'accept' || v === 'reject');
+
+    const acceptCount = castedVotes.filter(v => v === 'accept').length;
+    const rejectCount = castedVotes.filter(v => v === 'reject').length;
+    const allVoted    = otherUsernames.length > 0 && castedVotes.length >= otherUsernames.length;
+
+    if (!allVoted) return;
+
+    const majorityAccepted = acceptCount > rejectCount;
+
+    if (majorityAccepted) {
+      // Sirf requester force_clear_all bheje
+      if (myUsername.current === clearVote.requestedBy && channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast', event: 'force_clear_all',
+          payload: { requestedBy: clearVote.requestedBy, acceptCount, rejectCount },
+        });
+        // Requester apna chat bhi locally reset kare — broadcast woh receive nahi karta
+        const summary = ` (${acceptCount} accept, ${rejectCount} reject)`;
+        setMessages([{
+          id: uid(), type: 'system',
+          text: `— Fresh start by ${clearVote.requestedBy}${summary} —`,
+          timestamp: Date.now(), systemKind: 'clear',
+        }]);
+        setClearVote(null);
+        setMyVote(null);
+        setShowVoteModal(false);
+        setReplyingTo(null);
+        setImagePreview(null);
+      }
+    } else {
+      setTimeout(() => {
+        setShowVoteModal(false);
+        setClearVote(null);
+        setMyVote(null);
+      }, 1200);
+      addMsg({
+        id: uid(), type: 'system',
+        text: `Restart rejected (${acceptCount} accept, ${rejectCount} reject) — conversation continues.`,
+        timestamp: Date.now(), systemKind: 'info',
+      });
+    }
+  }, [clearVote, addMsg]);
 
   // ── LEAVE ─────────────────────────────────────────────────
   const handleLeave = useCallback(async () => {
@@ -314,11 +574,26 @@ export default function IPChat() {
     setTypingUsers(new Set());
     setImagePreview(null);
     setSidebarOpen(false);
+    setReplyingTo(null);
+    setClearVote(null);
+    setShowVoteModal(false);
+    setShowClearConfirm(false);
+    setShowAllClearConfirm(false);
+    setMyVote(null);
+    setCtxMenu(null);
     myUsername.current = '';
     myRoom.current = '';
   }, [cleanup, stopTyping]);
 
   useEffect(() => () => { cleanup(); }, [cleanup]);
+
+  // close context menu on outside click
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const handler = () => setCtxMenu(null);
+    window.addEventListener('click', handler);
+    return () => window.removeEventListener('click', handler);
+  }, [ctxMenu]);
 
   const onJoinKey = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') handleJoin(); };
   const onMsgKey  = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') handleSend(); };
@@ -332,6 +607,19 @@ export default function IPChat() {
 
   const onlineCount = members.length;
 
+  // vote summary
+  // voteAccepted/Rejected — live membersRef se compute (totalMembers timing bug fix)
+  const voteAccepted = clearVote
+    ? Object.entries(clearVote.votes).filter(([u, v]) => u !== clearVote.requestedBy && v === 'accept').length
+    : 0;
+  const voteRejected = clearVote
+    ? Object.entries(clearVote.votes).filter(([u, v]) => u !== clearVote.requestedBy && v === 'reject').length
+    : 0;
+  // "of N" = live non-requester member count
+  const voteTotal = clearVote
+    ? members.filter(m => m.username !== clearVote.requestedBy).length
+    : 0;
+
   // ════════════════════════════════════════════════════════
   //  RENDER
   // ════════════════════════════════════════════════════════
@@ -344,6 +632,121 @@ export default function IPChat() {
         <div className="ipc-lightbox" onClick={() => setLightbox(null)}>
           <button className="ipc-lightbox-close" onClick={() => setLightbox(null)}>✕</button>
           <img src={lightbox} alt="Full size" className="ipc-lightbox-img" />
+        </div>
+      )}
+
+      {/* ── CONTEXT MENU ── */}
+      {ctxMenu && (
+        <div
+          className="ipc-ctx-menu"
+          style={{ top: ctxMenu.y, left: ctxMenu.x }}
+          onClick={e => e.stopPropagation()}
+        >
+          <button
+            className="ipc-ctx-item ipc-ctx-danger"
+            onClick={() => handleDeleteForEveryone(ctxMenu.msgId)}
+          >
+            🗑 Delete for Everyone
+          </button>
+          <button className="ipc-ctx-item" onClick={() => setCtxMenu(null)}>Cancel</button>
+        </div>
+      )}
+
+      {/* ── CLEAR CONFIRM MODAL ── */}
+      {showClearConfirm && (
+        <div className="ipc-modal-backdrop">
+          <div className="ipc-modal ipc-confirm-modal">
+            <div className="ipc-modal-icon">🗑</div>
+            <div className="ipc-modal-title">Delete My Messages</div>
+            <div className="ipc-modal-body">
+              Your messages will be deleted for <strong>everyone</strong> in this room.
+              <br />This cannot be undone.
+            </div>
+            <div className="ipc-modal-btns">
+              <button className="ipc-modal-btn ipc-btn-reject" onClick={() => setShowClearConfirm(false)}>
+                Cancel
+              </button>
+              <button className="ipc-modal-btn ipc-btn-accept" onClick={() => {
+                setShowClearConfirm(false);
+                if (!channelRef.current) return;
+                setMessages(prev => {
+                  const myMsgs = prev.filter(m => m.type === 'message' && m.isSelf && !m.deleted);
+                  myMsgs.forEach(m => {
+                    channelRef.current?.send({ type:'broadcast', event:'delete_single', payload:{ msgId: m.id } });
+                  });
+                  return prev.map(m =>
+                    m.isSelf && m.type === 'message' && !m.deleted
+                      ? { ...m, deleted: true, text: 'This message was deleted.', image: undefined, replyTo: undefined }
+                      : m
+                  );
+                });
+              }}>
+                ✓ Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ALL CLEAR CONFIRM MODAL ── */}
+      {showAllClearConfirm && (
+        <div className="ipc-modal-backdrop">
+          <div className="ipc-modal ipc-confirm-modal">
+            <div className="ipc-modal-icon">🔄</div>
+            <div className="ipc-modal-title">Request Fresh Start</div>
+            <div className="ipc-modal-body">
+              A vote will be sent to all room members.
+              <br /><strong>Majority accept</strong> = fresh conversation starts.
+              <br /><strong>Equal or more reject</strong> = conversation continues.
+            </div>
+            <div className="ipc-modal-btns">
+              <button className="ipc-modal-btn ipc-btn-reject" onClick={() => setShowAllClearConfirm(false)}>
+                Cancel
+              </button>
+              <button className="ipc-modal-btn ipc-btn-accept" onClick={() => {
+                setShowAllClearConfirm(false);
+                handleRequestAllClear();
+              }}>
+                ✓ Send Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── VOTE MODAL — sirf non-requester members ko dikhta hai ── */}
+      {showVoteModal && clearVote && (
+        <div className="ipc-modal-backdrop">
+          <div className="ipc-modal">
+            <div className="ipc-modal-icon">🔄</div>
+            <div className="ipc-modal-title">Restart Request</div>
+            <div className="ipc-modal-body">
+              <strong>{clearVote.requestedBy}</strong> wants to start a fresh conversation.
+              <br />Majority accept = restart. Equal or more reject = continue.
+            </div>
+            <div className="ipc-modal-votes">
+              <span className="ipc-vote-accept">✓ {voteAccepted} accepted</span>
+              <span className="ipc-vote-reject">✕ {voteRejected} rejected</span>
+              <span className="ipc-vote-total">of {voteTotal}</span>
+            </div>
+            {!myVote ? (
+              <div className="ipc-modal-btns">
+                <button className="ipc-modal-btn ipc-btn-accept" onClick={() => castVote('accept')}>
+                  ✓ Accept
+                </button>
+                <button className="ipc-modal-btn ipc-btn-reject" onClick={() => castVote('reject')}>
+                  ✕ Reject
+                </button>
+              </div>
+            ) : (
+              <div className="ipc-modal-voted">
+                You voted: <strong className={myVote === 'accept' ? 'ipc-voted-yes' : 'ipc-voted-no'}>
+                  {myVote === 'accept' ? '✓ Accept' : '✕ Reject'}
+                </strong>
+                <br /><span className="ipc-modal-waiting">Waiting for others…</span>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -442,7 +845,7 @@ export default function IPChat() {
 
             <div className="ipc-sb-bottom">
               <button className="ipc-leave-btn" onClick={handleLeave}>← Leave Room</button>
-              <div className="ipc-ver">v2.2 // IPCHAT</div>
+              <div className="ipc-ver">v3.0 // IPCHAT</div>
             </div>
           </aside>
 
@@ -461,12 +864,20 @@ export default function IPChat() {
                 <span className="ipc-hid">{myRoom.current}</span>
               </div>
               <div className="ipc-hactions">
-                <button className="ipc-clear-btn" onClick={handleClear}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                {/* CLEAR — confirmation + apne messages delete */}
+                <button className="ipc-clear-btn ipc-clear-mine" onClick={() => setShowClearConfirm(true)}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="3,6 5,6 21,6"/>
                     <path d="M19,6l-1,14H6L5,6"/><path d="M10,11v6M14,11v6"/><path d="M9,6V4h6v2"/>
                   </svg>
                   <span className="ipc-clear-label">CLEAR</span>
+                </button>
+                {/* ALL CLEAR — confirmation then voting */}
+                <button className="ipc-clear-btn ipc-allclear-btn" onClick={() => setShowAllClearConfirm(true)}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0"/><path d="M9 12l2 2 4-4"/>
+                  </svg>
+                  <span className="ipc-clear-label">ALL CLEAR</span>
                 </button>
                 <div className="ipc-badge">
                   <span className="ipc-badge-dot" />
@@ -481,12 +892,47 @@ export default function IPChat() {
                 msg.type === 'system' ? (
                   <div key={msg.id} className={`ipc-sys ipc-sys-${msg.systemKind}`}>{msg.text}</div>
                 ) : (
-                  <div key={msg.id} className={`ipc-mwrap ${msg.isSelf ? 'ipc-self' : 'ipc-other'}`}>
+                  <div
+                    key={msg.id}
+                    className={`ipc-mwrap ${msg.isSelf ? 'ipc-self' : 'ipc-other'} ${msg.deleted ? 'ipc-deleted' : ''}`}
+                    ref={el => { msgRefs.current[msg.id] = el; }}
+                    onDoubleClick={() => handleDoubleClick(msg)}
+                    onTouchStart={e => handleTouchStart(msg.id, e)}
+                    onTouchEnd={e => handleTouchEnd(msg, e)}
+                    onContextMenu={msg.isSelf && !msg.deleted ? (e) => {
+                      e.preventDefault();
+                      setCtxMenu({ msgId: msg.id, x: e.clientX, y: e.clientY });
+                    } : undefined}
+                  >
                     <div className="ipc-mmeta">
                       {!msg.isSelf && <span className="ipc-muser">{msg.username}</span>}
                       <span className="ipc-mtime">{fmtTime(msg.timestamp)}</span>
+                      {/* Reply hint */}
+                      {!msg.deleted && (
+                        <button
+                          className="ipc-reply-hint"
+                          title="Reply"
+                          onClick={() => handleDoubleClick(msg)}
+                        >↩</button>
+                      )}
                     </div>
-                    {msg.image && (
+
+                    {/* Reply preview */}
+                    {msg.replyTo && !msg.deleted && (
+                      <div
+                        className="ipc-reply-preview"
+                        onClick={() => scrollToMsg(msg.replyTo!.id)}
+                        title="Jump to original"
+                      >
+                        <div className="ipc-reply-preview-user">{msg.replyTo.username}</div>
+                        <div className="ipc-reply-preview-text">
+                          {msg.replyTo.image && !msg.replyTo.text && '📷 Image'}
+                          {msg.replyTo.text && msg.replyTo.text.slice(0, 80)}
+                        </div>
+                      </div>
+                    )}
+
+                    {msg.image && !msg.deleted && (
                       <div className="ipc-img-bubble" onClick={() => setLightbox(msg.image!)}>
                         <img src={msg.image} alt="shared" className="ipc-img-thumb" />
                         <div className="ipc-img-overlay">
@@ -496,7 +942,9 @@ export default function IPChat() {
                         </div>
                       </div>
                     )}
-                    {msg.text && <div className="ipc-bubble">{msg.text}</div>}
+                    <div className={`ipc-bubble ${msg.deleted ? 'ipc-bubble-deleted' : ''}`}>
+                      {msg.text || (msg.deleted ? 'This message was deleted.' : '')}
+                    </div>
                   </div>
                 )
               )}
@@ -512,6 +960,23 @@ export default function IPChat() {
                 </>
               )}
             </div>
+
+            {/* REPLY BAR */}
+            {replyingTo && (
+              <div className="ipc-reply-bar">
+                <div className="ipc-reply-bar-inner">
+                  <div className="ipc-reply-bar-accent" />
+                  <div className="ipc-reply-bar-content">
+                    <div className="ipc-reply-bar-user">↩ Replying to {replyingTo.username}</div>
+                    <div className="ipc-reply-bar-text">
+                      {replyingTo.image && !replyingTo.text && '📷 Image'}
+                      {replyingTo.text && replyingTo.text.slice(0, 80)}
+                    </div>
+                  </div>
+                </div>
+                <button className="ipc-reply-cancel" onClick={() => setReplyingTo(null)}>✕</button>
+              </div>
+            )}
 
             {/* IMAGE PREVIEW */}
             {imagePreview && (
@@ -539,7 +1004,7 @@ export default function IPChat() {
                   <polyline points="21,15 16,10 5,21"/>
                 </svg>
               </button>
-              <input className="ipc-msg-in" type="text" placeholder="Type a message..."
+              <input className="ipc-msg-in" type="text" placeholder="Type a message…"
                 value={msgInput} maxLength={500} autoComplete="off" spellCheck={false}
                 onChange={handleMsgInput} onKeyDown={onMsgKey} />
               <button className="ipc-send" onClick={handleSend}>
@@ -561,6 +1026,8 @@ export default function IPChat() {
 //  STYLES
 // ════════════════════════════════════════════════════════════
 const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Share+Tech+Mono&display=swap');
+
   /* ── FULL SCREEN FIX ── */
   html, body { height:100%; margin:0; padding:0; overflow:hidden; }
   #root { height:100%; width:100%; }
@@ -697,6 +1164,8 @@ const CSS = `
   .ipc-hactions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
   .ipc-clear-btn { background:transparent; border:1px solid var(--bo); border-radius:4px; color:var(--td); font-family:var(--mo); font-size:10px; letter-spacing:1.5px; padding:5px 10px; cursor:pointer; display:flex; align-items:center; gap:5px; transition:all .2s; }
   .ipc-clear-btn:hover { border-color:rgba(255,68,102,.4); color:var(--re); background:rgba(255,68,102,.06); }
+  .ipc-allclear-btn { border-color:rgba(0,212,255,.25) !important; color:var(--cd) !important; }
+  .ipc-allclear-btn:hover { border-color:var(--c) !important; color:var(--c) !important; background:rgba(0,212,255,.06) !important; }
   .ipc-clear-label { display:inline; }
   .ipc-badge  { display:flex; align-items:center; gap:6px; font-family:var(--mo); font-size:12px; color:var(--tx); background:var(--bg3); border:1px solid var(--bo); border-radius:4px; padding:5px 12px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .ipc-badge-dot { width:6px; height:6px; background:var(--gr); border-radius:50%; box-shadow:0 0 6px var(--gr); flex-shrink:0; }
@@ -711,37 +1180,102 @@ const CSS = `
   .ipc-sys-leave { color:rgba(255,68,102,.7); border-color:rgba(255,68,102,.12); }
   .ipc-sys-clear { color:rgba(0,212,255,.6);  border-color:rgba(0,212,255,.12); }
 
-  .ipc-mwrap { display:flex; flex-direction:column; max-width:68%; animation:ipcMsgIn .25s cubic-bezier(.22,1,.36,1) both; margin-bottom:10px; }
+  .ipc-mwrap {
+    display:flex; flex-direction:column;
+    max-width:68%;
+    animation:ipcMsgIn .25s cubic-bezier(.22,1,.36,1) both;
+    margin-bottom:12px;
+    cursor:default;
+    user-select:text;
+    transition:background .15s;
+  }
   @keyframes ipcMsgIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
   .ipc-self  { align-self:flex-end;   align-items:flex-end; }
   .ipc-other { align-self:flex-start; align-items:flex-start; }
 
+  /* Highlight on scroll-to */
+  .ipc-msg-highlight { animation:ipcHighlight .8s ease; }
+  @keyframes ipcHighlight { 0%,100%{background:transparent} 30%{background:rgba(0,212,255,0.08)} }
+
   .ipc-mmeta { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
-  .ipc-muser { font-family:var(--mo); font-size:11px; color:var(--cd); letter-spacing:.5px; }
+  /* [1] Bigger username font */
+  .ipc-muser { font-family:var(--sa); font-size:13px; font-weight:600; color:var(--cd); letter-spacing:.8px; }
   .ipc-mtime { font-family:var(--mo); font-size:10px; color:var(--tm); }
 
-  /* ── BUBBLES — big & readable ── */
+  /* ── REPLY HINT BUTTON ── */
+  .ipc-reply-hint {
+    background:transparent; border:none; color:var(--tm); font-size:14px;
+    cursor:pointer; padding:0 4px; opacity:0; transition:opacity .2s, color .2s;
+    line-height:1;
+  }
+  .ipc-mwrap:hover .ipc-reply-hint { opacity:1; }
+  .ipc-reply-hint:hover { color:var(--c); }
+
+  /* ── REPLY PREVIEW (inside bubble) ── */
+  .ipc-reply-preview {
+    background:rgba(0,212,255,0.05);
+    border-left:3px solid var(--cd);
+    border-radius:6px 6px 0 0;
+    padding:7px 12px 6px;
+    margin-bottom:2px;
+    max-width:100%;
+    cursor:pointer;
+    transition:background .2s;
+  }
+  .ipc-self .ipc-reply-preview {
+    border-left-color:#a08aff;
+    background:rgba(124,92,252,0.12);
+  }
+  .ipc-reply-preview:hover { background:rgba(0,212,255,0.1); }
+  .ipc-self .ipc-reply-preview:hover { background:rgba(124,92,252,0.2); }
+  .ipc-reply-preview-user {
+    font-family:var(--sa); font-size:12px; font-weight:700;
+    color:var(--cd); letter-spacing:.5px; margin-bottom:2px;
+  }
+  .ipc-self .ipc-reply-preview-user { color:#b8a0ff; }
+  .ipc-reply-preview-text {
+    font-family:var(--sa); font-size:13px; color:var(--td);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:260px;
+  }
+
+  /* ── BUBBLES — bigger, Rajdhani forced ── */
   .ipc-bubble {
-    padding:12px 18px;
-    border-radius:20px;
-    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    font-size:16px; font-weight:400; line-height:1.55;
-    max-width:100%; word-break:break-word;
+    padding:14px 22px !important;
+    border-radius:22px !important;
+    font-family:'Rajdhani', 'Segoe UI', sans-serif !important;
+    font-size:18px !important;
+    font-weight:500 !important;
+    line-height:1.6 !important;
+    letter-spacing:0.25px !important;
+    max-width:100%;
+    word-break:break-word;
+    min-width:80px;
+    width:fit-content;
+    display:block;
   }
   /* YOUR messages — solid purple */
   .ipc-self .ipc-bubble {
-    background:#7c5cfc;
-    color:#fff;
-    border:none;
-    border-bottom-right-radius:4px;
-    box-shadow:0 3px 16px rgba(124,92,252,0.4);
+    background:#7c5cfc !important;
+    color:#fff !important;
+    border:none !important;
+    border-bottom-right-radius:5px !important;
+    box-shadow:0 4px 20px rgba(124,92,252,0.45) !important;
   }
-  /* OTHER person's messages — dark card */
+  /* OTHER messages — dark card */
   .ipc-other .ipc-bubble {
-    background:#1a2235;
-    border:1px solid #243050;
-    color:#ddeeff;
-    border-bottom-left-radius:4px;
+    background:#1e2a40 !important;
+    border:1px solid #2a3a58 !important;
+    color:#e8f4ff !important;
+    border-bottom-left-radius:5px !important;
+  }
+  /* Deleted message style */
+  .ipc-bubble-deleted {
+    font-style:italic !important;
+    opacity:0.45 !important;
+    font-size:14px !important;
+  }
+  .ipc-self.ipc-deleted .ipc-bubble {
+    background:#3a2a6a !important;
   }
 
   /* ── IMAGE BUBBLE ── */
@@ -757,6 +1291,26 @@ const CSS = `
   .ipc-lightbox-close { position:absolute; top:16px; right:20px; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.2); border-radius:50%; width:36px; height:36px; color:#fff; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .2s; }
   .ipc-lightbox-close:hover { background:rgba(255,68,102,.3); }
 
+  /* ── CONTEXT MENU ── */
+  .ipc-ctx-menu {
+    position:fixed; z-index:500;
+    background:var(--bg2); border:1px solid var(--bo2);
+    border-radius:8px; overflow:hidden;
+    box-shadow:0 8px 32px rgba(0,0,0,.6);
+    animation:ipcIn .15s ease both;
+    min-width:180px;
+  }
+  .ipc-ctx-item {
+    display:block; width:100%; text-align:left;
+    background:transparent; border:none;
+    color:var(--tx); font-family:var(--sa); font-size:14px; font-weight:500;
+    padding:11px 16px; cursor:pointer; letter-spacing:.3px;
+    transition:background .15s;
+  }
+  .ipc-ctx-item:hover { background:rgba(255,255,255,.05); }
+  .ipc-ctx-danger { color:var(--re) !important; }
+  .ipc-ctx-danger:hover { background:rgba(255,68,102,.08) !important; }
+
   /* ── IMAGE PREVIEW BAR ── */
   .ipc-img-preview-bar { display:flex; align-items:center; gap:10px; padding:8px 16px; background:rgba(124,92,252,.08); border-top:1px solid rgba(124,92,252,.2); flex-shrink:0; }
   .ipc-img-preview-thumb { width:42px; height:42px; object-fit:cover; border-radius:6px; border:1px solid rgba(124,92,252,.3); }
@@ -764,6 +1318,21 @@ const CSS = `
   .ipc-img-preview-remove { background:transparent; border:none; color:var(--re); font-size:16px; cursor:pointer; padding:4px 8px; border-radius:4px; transition:background .2s; }
   .ipc-img-preview-remove:hover { background:rgba(255,68,102,.1); }
   .ipc-upload-err { padding:4px 16px; font-family:var(--mo); font-size:10px; color:var(--re); flex-shrink:0; }
+
+  /* ── REPLY BAR ── */
+  .ipc-reply-bar {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:8px 14px; background:rgba(0,212,255,.04);
+    border-top:1px solid rgba(0,212,255,.12); flex-shrink:0;
+    animation:ipcIn .2s ease both;
+  }
+  .ipc-reply-bar-inner { display:flex; align-items:stretch; gap:10px; flex:1; min-width:0; }
+  .ipc-reply-bar-accent { width:3px; border-radius:2px; background:var(--cd); flex-shrink:0; }
+  .ipc-reply-bar-content { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .ipc-reply-bar-user { font-family:var(--sa); font-size:12px; font-weight:700; color:var(--cd); letter-spacing:.5px; }
+  .ipc-reply-bar-text { font-family:var(--sa); font-size:13px; color:var(--td); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:320px; }
+  .ipc-reply-cancel { background:transparent; border:none; color:var(--tm); font-size:18px; cursor:pointer; padding:4px 8px; border-radius:4px; transition:all .2s; flex-shrink:0; }
+  .ipc-reply-cancel:hover { color:var(--re); background:rgba(255,68,102,.08); }
 
   /* ── TYPING ── */
   .ipc-typing { padding:4px 20px; font-family:var(--mo); font-size:11px; color:var(--tm); display:flex; align-items:center; gap:9px; height:28px; flex-shrink:0; opacity:0; transition:opacity .2s; }
@@ -778,13 +1347,72 @@ const CSS = `
   .ipc-bar { height:68px; background:var(--bg2); border-top:1px solid var(--bo); display:flex; align-items:center; gap:10px; padding:0 14px; flex-shrink:0; }
   .ipc-attach { width:40px; height:40px; min-width:40px; background:transparent; border:1px solid var(--bo); border-radius:var(--ra); color:var(--td); cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .2s; }
   .ipc-attach:hover { border-color:var(--c); color:var(--c); background:var(--cg); }
-  .ipc-msg-in { flex:1; background:var(--bg3); border:1px solid var(--bo); border-radius:24px; color:var(--tx); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:16px; font-weight:400; padding:12px 20px; outline:none; transition:border-color .2s,box-shadow .2s; min-width:0; }
-  .ipc-msg-in::placeholder { color:var(--tm); }
+  /* [1] bigger input font — forced */
+  .ipc-msg-in {
+    flex:1; background:var(--bg3); border:1px solid var(--bo); border-radius:24px;
+    color:var(--tx) !important;
+    font-family:'Rajdhani', 'Segoe UI', sans-serif !important;
+    font-size:18px !important;
+    font-weight:500 !important;
+    letter-spacing:0.25px;
+    padding:12px 20px; outline:none;
+    transition:border-color .2s,box-shadow .2s; min-width:0;
+  }
+  .ipc-msg-in::placeholder { color:var(--tm); font-size:16px; font-family:'Rajdhani', sans-serif; }
   .ipc-msg-in:focus { border-color:var(--cd); box-shadow:0 0 0 3px var(--cg); }
   .ipc-send { position:relative; width:44px; height:44px; min-width:44px; background:#7c5cfc; border:none; border-radius:50%; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden; transition:transform .15s,box-shadow .2s,background .2s; }
   .ipc-send:hover { background:#9b7ffe; transform:scale(1.08); box-shadow:0 0 20px rgba(124,92,252,.5); }
   .ipc-send:active { transform:scale(.96); }
   .ipc-send-glow { position:absolute; inset:0; background:linear-gradient(135deg,rgba(255,255,255,.2),transparent 60%); pointer-events:none; }
+
+  /* ── CONFIRM MODAL (smaller) ── */
+  .ipc-confirm-modal {
+    max-width:340px !important;
+    padding:28px 24px !important;
+  }
+  .ipc-confirm-modal .ipc-modal-icon { font-size:28px; margin-bottom:8px; }
+  .ipc-confirm-modal .ipc-modal-title { font-size:13px; }
+  .ipc-confirm-modal .ipc-modal-body { font-size:14px; margin-bottom:16px; }
+
+  /* ── VOTE MODAL ── */
+  .ipc-modal-backdrop {
+    position:fixed; inset:0; z-index:800;
+    background:rgba(0,0,0,.75); backdrop-filter:blur(6px);
+    display:flex; align-items:center; justify-content:center;
+    animation:ipcIn .2s ease both;
+  }
+  .ipc-modal {
+    background:var(--bg2); border:1px solid var(--bo2);
+    border-radius:14px; padding:32px 28px;
+    max-width:380px; width:92vw;
+    box-shadow:0 0 0 1px rgba(0,212,255,.06), 0 24px 80px rgba(0,0,0,.7);
+    text-align:center;
+    animation:ipcIn .25s cubic-bezier(.22,1,.36,1) both;
+  }
+  .ipc-modal-icon  { font-size:34px; margin-bottom:10px; }
+  .ipc-modal-title { font-family:var(--sp); font-size:15px; letter-spacing:3px; color:var(--c); text-transform:uppercase; margin-bottom:12px; }
+  .ipc-modal-body  { font-family:var(--sa); font-size:16px; color:var(--tx); line-height:1.6; margin-bottom:18px; }
+  .ipc-modal-body strong { color:var(--c); }
+  .ipc-modal-votes { display:flex; gap:14px; justify-content:center; margin-bottom:22px; font-family:var(--mo); font-size:12px; flex-wrap:wrap; }
+  .ipc-vote-accept { color:var(--gr); }
+  .ipc-vote-reject { color:var(--re); }
+  .ipc-vote-total  { color:var(--tm); }
+  .ipc-modal-btns  { display:flex; gap:12px; justify-content:center; }
+  .ipc-modal-btn {
+    flex:1; max-width:140px;
+    border:none; border-radius:8px; padding:12px 20px;
+    font-family:var(--sp); font-size:12px; font-weight:700;
+    letter-spacing:2px; cursor:pointer; transition:all .2s;
+  }
+  .ipc-btn-accept { background:var(--gr); color:#060e1a; }
+  .ipc-btn-accept:hover { background:#44ffaa; box-shadow:0 0 18px rgba(0,255,136,.4); }
+  .ipc-btn-reject { background:var(--re); color:#fff; }
+  .ipc-btn-reject:hover { background:#ff6680; box-shadow:0 0 18px rgba(255,68,102,.4); }
+  .ipc-modal-voted { font-family:var(--sa); font-size:16px; color:var(--td); }
+  .ipc-modal-voted strong { color:var(--tx); }
+  .ipc-voted-yes { color:var(--gr) !important; }
+  .ipc-voted-no  { color:var(--re) !important; }
+  .ipc-modal-waiting { font-family:var(--mo); font-size:11px; color:var(--tm); letter-spacing:.5px; margin-top:6px; display:block; }
 
   /* ════════════════════════
      MOBILE RESPONSIVE
@@ -800,11 +1428,13 @@ const CSS = `
     .ipc-mwrap { max-width:88%; }
     .ipc-img-bubble { max-width:210px; }
     .ipc-clear-label { display:none; }
-    .ipc-badge { max-width:90px; font-size:10px; padding:3px 8px; }
+    .ipc-badge { max-width:80px; font-size:10px; padding:3px 8px; }
     .ipc-msgs { padding:14px 12px; }
     .ipc-bar  { padding:0 10px; gap:8px; height:64px; }
-    .ipc-hid  { max-width:110px; }
-    .ipc-bubble { font-size:15px; }
-    .ipc-msg-in { font-size:15px; }
+    .ipc-hid  { max-width:90px; }
+    .ipc-bubble { font-size:16px !important; padding:11px 16px !important; }
+    .ipc-msg-in { font-size:16px !important; }
+    .ipc-reply-bar-text { max-width:180px; }
+    .ipc-hactions { gap:5px; }
   }
 `;
