@@ -224,7 +224,18 @@ export default function IPChat() {
     const rId   = sanitize(roomId).slice(0, 64);
 
     if (!uName) { setJoinError('⚠ Enter a username'); return; }
-    if (!rId)   { setJoinError('⚠ Enter an IP / room code'); return; }
+    if (!rId)   { setJoinError('⚠ Enter a valid IP — e.g. 192.168.1.1'); return; }
+    // IP format validate karo — 4 octets, 0-255
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(rId)) {
+      setJoinError('⚠ Invalid IP — Enter like 192.168.1.1');
+      return;
+    }
+    const octets = rId.split('.').map(Number);
+    if (octets.some(o => o < 0 || o > 255)) {
+      setJoinError('⚠ Each number must be 0–255 — e.g. 192.168.1.1');
+      return;
+    }
 
     setJoinError('');
     setConnecting(true);
@@ -778,10 +789,35 @@ export default function IPChat() {
               <div className="ipc-iw">
                 <span className="ipc-ii">⬡</span>
                 <input className="ipc-in" type="text" placeholder="e.g. 192.168.1.1"
-                  value={roomId} maxLength={64} autoComplete="off" spellCheck={false}
-                  onChange={e => setRoomId(e.target.value)} onKeyDown={onJoinKey} />
+                  value={roomId} maxLength={15} autoComplete="off" spellCheck={false}
+                  inputMode="numeric"
+                  onChange={e => {
+                    // Sirf numbers aur dots allow karo
+                    const raw = e.target.value.replace(/[^0-9.]/g, '');
+                    // Max 3 dots (4 octets)
+                    const parts = raw.split('.');
+                    if (parts.length > 4) return;
+                    // Har octet max 3 digits
+                    const clean = parts.map(p => p.slice(0, 3)).join('.');
+                    setRoomId(clean);
+                  }}
+                  onKeyDown={e => {
+                    // Auto dot after 3 digits in current octet
+                    const parts = roomId.split('.');
+                    const lastPart = parts[parts.length - 1];
+                    if (
+                      /^[0-9]$/.test(e.key) &&
+                      lastPart.length === 3 &&
+                      parts.length < 4
+                    ) {
+                      e.preventDefault();
+                      setRoomId(roomId + '.' + e.key);
+                      return;
+                    }
+                    if (e.key === 'Enter') handleJoin();
+                  }} />
               </div>
-              <p className="ipc-hint">Anyone who enters the same IP will share this room</p>
+              <p className="ipc-hint">Enter a valid IP like 192.168.1.1 — only numbers allowed</p>
             </div>
 
             <button className="ipc-conn-btn" onClick={handleJoin} disabled={connecting}>
