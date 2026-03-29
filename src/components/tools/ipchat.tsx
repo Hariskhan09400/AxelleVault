@@ -1006,7 +1006,13 @@ export default function IPChat() {
               </button>
               <input className="ipc-msg-in" type="text" placeholder="Type a message…"
                 value={msgInput} maxLength={500} autoComplete="off" spellCheck={false}
-                onChange={handleMsgInput} onKeyDown={onMsgKey} />
+                inputMode="text"
+                enterKeyHint="send"
+                onChange={handleMsgInput} onKeyDown={onMsgKey}
+                onFocus={e => {
+                  // iOS: scroll input into view when keyboard opens
+                  setTimeout(() => e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 300);
+                }} />
               <button className="ipc-send" onClick={handleSend}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <line x1="22" y1="2" x2="11" y2="13"/>
@@ -1031,6 +1037,13 @@ const CSS = `
   /* ── FULL SCREEN FIX ── */
   html, body { height:100%; margin:0; padding:0; overflow:hidden; }
   #root { height:100%; width:100%; }
+
+  /* ── MOBILE VIEWPORT FIX ── */
+  /* Use dvh (dynamic viewport height) — shrinks when keyboard opens */
+  .ipc-chat-root {
+    height: 100dvh;
+    height: 100vh; /* fallback */
+  }
 
   /* ── VARS ── */
   .ipc-wrap, .ipc-chat-root {
@@ -1415,26 +1428,124 @@ const CSS = `
   .ipc-modal-waiting { font-family:var(--mo); font-size:11px; color:var(--tm); letter-spacing:.5px; margin-top:6px; display:block; }
 
   /* ════════════════════════
-     MOBILE RESPONSIVE
+     MOBILE RESPONSIVE — full keyboard fix
   ════════════════════════ */
+
+  /* iOS Safari 100vh bug fix — use dvh where supported */
+  @supports (height: 100dvh) {
+    .ipc-wrap, .ipc-chat-root {
+      height: 100dvh !important;
+    }
+  }
+
   @media (max-width: 640px) {
+    /* ── Layout: use dvh, avoid fixed overflow:hidden conflicts ── */
+    html, body {
+      height: 100% !important;
+      overflow: hidden !important;
+      /* Prevent iOS bounce scroll */
+      overscroll-behavior: none;
+    }
+
+    .ipc-wrap {
+      height: 100svh !important;
+      height: 100dvh !important;
+    }
+
+    /* Chat root — fill screen, flex column, let keyboard push it */
+    .ipc-chat-root {
+      position: fixed !important;
+      top: 0; left: 0; right: 0; bottom: 0;
+      height: 100% !important;
+      /* env(safe-area-inset-bottom) for iPhone notch */
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    /* Main area — fill remaining, flex column */
+    .ipc-main {
+      display: flex !important;
+      flex-direction: column !important;
+      height: 100% !important;
+      overflow: hidden !important;
+    }
+
+    /* Messages area — flex:1 so it shrinks when keyboard opens */
+    .ipc-msgs {
+      flex: 1 1 0% !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
+      padding: 14px 12px !important;
+      /* Prevent overscroll */
+      overscroll-behavior-y: contain;
+    }
+
+    /* Input bar — always at bottom, never hidden behind keyboard */
+    .ipc-bar {
+      flex-shrink: 0 !important;
+      position: relative !important;
+      padding: 8px 10px !important;
+      padding-bottom: max(8px, env(safe-area-inset-bottom)) !important;
+      height: auto !important;
+      min-height: 60px;
+      gap: 8px;
+      /* Ensure tappable */
+      z-index: 10;
+    }
+
+    /* Input field — bigger tap target, no zoom on iOS (font>=16px prevents zoom) */
+    .ipc-msg-in {
+      font-size: 16px !important;
+      padding: 10px 16px !important;
+      min-height: 44px !important;
+      /* Prevent iOS from zooming in */
+      -webkit-text-size-adjust: 100%;
+    }
+
+    /* Send button — bigger tap target */
+    .ipc-send {
+      width: 44px !important;
+      height: 44px !important;
+      min-width: 44px !important;
+      flex-shrink: 0 !important;
+    }
+
+    /* Attach button */
+    .ipc-attach {
+      width: 40px !important;
+      height: 40px !important;
+      min-width: 40px !important;
+      flex-shrink: 0 !important;
+    }
+
+    /* Sidebar — slide in from left */
     .ipc-hamburger { display:flex; }
     .ipc-sidebar {
       position:fixed; top:0; left:0; bottom:0;
-      transform:translateX(-100%); z-index:20; box-shadow:4px 0 30px rgba(0,0,0,.5);
+      transform:translateX(-100%); z-index:20;
+      box-shadow:4px 0 30px rgba(0,0,0,.5);
+      height: 100% !important;
     }
     .ipc-sidebar-open { transform:translateX(0); }
     .ipc-sidebar-backdrop { display:block; }
+
+    /* Messages */
     .ipc-mwrap { max-width:88%; }
     .ipc-img-bubble { max-width:210px; }
+    .ipc-bubble { font-size:16px !important; padding:11px 16px !important; }
+
+    /* Header */
     .ipc-clear-label { display:none; }
     .ipc-badge { max-width:80px; font-size:10px; padding:3px 8px; }
-    .ipc-msgs { padding:14px 12px; }
-    .ipc-bar  { padding:0 10px; gap:8px; height:64px; }
     .ipc-hid  { max-width:90px; }
-    .ipc-bubble { font-size:16px !important; padding:11px 16px !important; }
-    .ipc-msg-in { font-size:16px !important; }
-    .ipc-reply-bar-text { max-width:180px; }
     .ipc-hactions { gap:5px; }
+
+    /* Reply bar */
+    .ipc-reply-bar-text { max-width:180px; }
+  }
+
+  /* Extra small phones */
+  @media (max-width: 380px) {
+    .ipc-msg-in { font-size:16px !important; padding:8px 12px !important; }
+    .ipc-bubble { font-size:15px !important; }
   }
 `;
