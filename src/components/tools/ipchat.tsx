@@ -1586,7 +1586,7 @@ const CSS = `
     /* Messages */
     .ipc-mwrap { max-width:88%; }
     .ipc-img-bubble { max-width:210px; }
-    .ipc-bubble { font-size:14px !important; padding:9px 14px !important; }
+    .ipc-bubble { font-size:12px !important; padding:7px 12px !important; }
 
     /* Header */
     .ipc-clear-label { display:none; }
