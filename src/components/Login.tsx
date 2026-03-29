@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Shield, Mail, Lock, AlertCircle, Cpu, Fingerprint } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion'; // For advanced animations
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../contexts/ToastContext';
 import { hasSupabaseEnv } from '../lib/supabase';
@@ -13,6 +13,7 @@ interface LoginProps {
 export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false); // ✅ Remember Me state
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
@@ -22,6 +23,13 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    // ✅ Remember Me: email ko localStorage me save karo
+    if (rememberMe) {
+      localStorage.setItem('rememberedEmail', email);
+    } else {
+      localStorage.removeItem('rememberedEmail');
+    }
 
     const { error: authError } = await signIn(email, password);
 
@@ -35,6 +43,15 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
     setLoading(false);
   };
 
+  // ✅ Remembered email auto-fill on mount
+  useState(() => {
+    const saved = localStorage.getItem('rememberedEmail');
+    if (saved) {
+      setEmail(saved);
+      setRememberMe(true);
+    }
+  });
+
   return (
     <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4 overflow-hidden font-sans">
       {/* Dynamic Cyber Background */}
@@ -44,7 +61,7 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
       </div>
 
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
@@ -52,12 +69,12 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
       >
         {/* Glowing Border Effect */}
         <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 to-green-500 rounded-2xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
-        
+
         <div className="relative bg-gray-900/80 backdrop-blur-2xl border border-white/10 rounded-2xl p-8 shadow-2xl">
-          
+
           {/* Header Section */}
           <div className="text-center mb-10">
-            <motion.div 
+            <motion.div
               whileHover={{ scale: 1.05 }}
               className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-cyan-500/10 border border-cyan-500/30 mb-4"
             >
@@ -72,7 +89,7 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
           </div>
 
           {!hasSupabaseEnv && (
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.9 }}
               animate={{ scale: 1 }}
               className="mb-6 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4 text-xs text-yellow-200/80 flex items-start gap-3"
@@ -84,7 +101,7 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
 
           <AnimatePresence mode="wait">
             {error && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
@@ -131,6 +148,36 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
               </div>
             </div>
 
+            {/* ✅ Remember Me Checkbox */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setRememberMe(!rememberMe)}
+                className={`relative w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-200 flex-shrink-0 ${
+                  rememberMe
+                    ? 'bg-cyan-500 border-cyan-500'
+                    : 'bg-transparent border-gray-600 hover:border-cyan-500/50'
+                }`}
+              >
+                {rememberMe && (
+                  <motion.svg
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="w-3 h-3 text-white"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={3}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </motion.svg>
+                )}
+              </button>
+              <span className="text-sm text-gray-400 select-none cursor-pointer" onClick={() => setRememberMe(!rememberMe)}>
+                Remember my access credentials
+              </span>
+            </div>
+
             <motion.button
               whileTap={{ scale: 0.98 }}
               type="submit"
@@ -140,7 +187,10 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
               <div className="relative flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-3 transition-all group-hover:bg-transparent">
                 {loading ? (
                   <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
                     Verifying...
                   </span>
                 ) : (
@@ -158,22 +208,24 @@ export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
               onClick={onForgotPassword}
               className="text-gray-400 hover:text-cyan-400 text-sm transition-all duration-300"
             >
-              Forgot your access key? <span className="text-cyan-400 font-bold hover:underline underline-offset-4">Recover Account</span>
+              Forgot your access key?{' '}
+              <span className="text-cyan-400 font-bold hover:underline underline-offset-4">Recover Account</span>
             </button>
             <button
               onClick={onToggleMode}
               className="text-gray-400 hover:text-cyan-400 text-sm transition-all duration-300"
             >
-              System newcomer? <span className="text-cyan-400 font-bold hover:underline underline-offset-4">Register Identity</span>
+              System newcomer?{' '}
+              <span className="text-cyan-400 font-bold hover:underline underline-offset-4">Register Identity</span>
             </button>
           </div>
         </div>
 
         {/* Footer Meta */}
         <div className="mt-6 flex justify-between items-center px-2">
-          <div className="flex gap-2">
-             <div className="w-2 h-2 rounded-full bg-green-500 animate-ping"></div>
-             <span className="text-[10px] text-gray-500 font-mono">ENCRYPTION ACTIVE</span>
+          <div className="flex gap-2 items-center">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-ping"></div>
+            <span className="text-[10px] text-gray-500 font-mono">ENCRYPTION ACTIVE</span>
           </div>
           <p className="text-gray-600 text-[10px] font-mono tracking-widest uppercase">
             © 2026 AXELLE-CORP
