@@ -1373,7 +1373,7 @@ const CSS = `
     flex:1; background:var(--bg3); border:1px solid var(--bo); border-radius:24px;
     color:var(--tx) !important;
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;
-    font-size:20px !important;
+    font-size:16px !important;
     font-weight:400 !important;
     letter-spacing:0px;
     padding:11px 18px; outline:none;
@@ -1600,7 +1600,7 @@ const CSS = `
 
   /* Extra small phones */
   @media (max-width: 380px) {
-    .ipc-msg-in { font-size:20px !important; padding:12px 18px !important; }
+    .ipc-msg-in { font-size:16px !important; padding:12px 18px !important; }
     .ipc-bubble { font-size:15px !important; }
   }
 `;
