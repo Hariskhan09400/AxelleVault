@@ -14,6 +14,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+// ─── Interfaces ────────────────────────────────────────────────────────────────
+
 export interface UserProfile {
   id: string;
   username: string | null;
@@ -85,10 +87,12 @@ export interface ToolUsageHistory {
   created_at: string;
 }
 
+// ─── notesvault row type ───────────────────────────────────────────────────────
 export interface EncryptedNote {
   id: string;
   user_id: string;
-  encrypted_content: string;
+  type: 'note';
+  content: string;
   iv: string;
   salt: string;
   created_at: string;
@@ -101,6 +105,7 @@ export interface UserRole {
   created_at: string;
 }
 
+// ─── Tool usage ────────────────────────────────────────────────────────────────
 export const logToolUsage = async (
   userId: string,
   toolName: string,
@@ -116,65 +121,83 @@ export const logToolUsage = async (
   });
 };
 
+// ─── Notes — notesvault table use karo ────────────────────────────────────────
 export const saveEncryptedNote = async (
   userId: string,
-  encryptedContent: string,
+  content: string,
   iv: string,
   salt: string
 ) => {
-  const result = await supabase.from('encrypted_notes').insert({
+  const result = await supabase.from('notesvault').insert({
     user_id: userId,
-    encrypted_content: encryptedContent,
+    type: 'note',
+    content,
     iv,
     salt,
   });
-  if (result.error) {
-    console.error('[Supabase] saveEncryptedNote error:', result.error.message);
-  }
+  if (result.error) console.error('[Supabase] saveEncryptedNote error:', result.error.message);
   return result;
 };
 
 export const fetchEncryptedNotes = async (userId: string) => {
-  const result = await supabase.from('encrypted_notes').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-  if (result.error) {
-    console.error('[Supabase] fetchEncryptedNotes error:', result.error.message);
-  }
+  const result = await supabase
+    .from('notesvault')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('type', 'note')
+    .order('created_at', { ascending: false });
+  if (result.error) console.error('[Supabase] fetchEncryptedNotes error:', result.error.message);
   return result;
 };
 
 export const deleteEncryptedNote = async (noteId: string) => {
-  const result = await supabase.from('encrypted_notes').delete().eq('id', noteId);
-  if (result.error) {
-    console.error('[Supabase] deleteEncryptedNote error:', result.error.message);
-  }
+  const result = await supabase.from('notesvault').delete().eq('id', noteId);
+  if (result.error) console.error('[Supabase] deleteEncryptedNote error:', result.error.message);
   return result;
 };
 
 export const deleteAllUserNotes = async (userId: string) => {
-  const result = await supabase.from('encrypted_notes').delete().eq('user_id', userId);
-  if (result.error) {
-    console.error('[Supabase] deleteAllUserNotes error:', result.error.message);
-  }
+  const result = await supabase
+    .from('notesvault')
+    .delete()
+    .eq('user_id', userId)
+    .eq('type', 'note');
+  if (result.error) console.error('[Supabase] deleteAllUserNotes error:', result.error.message);
   return result;
 };
 
-// PIN Management
+// ─── PIN — notesvault table use karo (type = 'pin') ───────────────────────────
 export const savePinHash = async (userId: string, pinHash: string, maxRetries = 3) => {
   let lastError: any = null;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const result = await supabase.from('vault_pins').upsert(
-        { user_id: userId, pin_hash: pinHash, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' }
-      );
-      
+      // Pehle check karo pin row hai ya nahi
+      const { data: existing } = await supabase
+        .from('notesvault')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('type', 'pin')
+        .maybeSingle();
+
+      let result;
+      if (existing?.id) {
+        // Update
+        result = await supabase
+          .from('notesvault')
+          .update({ pin_hash: pinHash })
+          .eq('id', existing.id);
+      } else {
+        // Insert
+        result = await supabase
+          .from('notesvault')
+          .insert({ user_id: userId, type: 'pin', pin_hash: pinHash });
+      }
+
       if (result.error) {
         lastError = result.error;
-        // Check if error is lock-related and retryable
-        if (result.error.message && result.error.message.includes('Lock') && attempt < maxRetries - 1) {
-          const delay = Math.pow(2, attempt) * 100; // exponential backoff: 100ms, 200ms, 400ms
-          await new Promise(resolve => setTimeout(resolve, delay));
+        if (attempt < maxRetries - 1) {
+          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 100));
           continue;
         }
         console.error('[Supabase] savePinHash error:', result.error.message);
@@ -183,21 +206,22 @@ export const savePinHash = async (userId: string, pinHash: string, maxRetries = 
     } catch (err) {
       lastError = err;
       if (attempt < maxRetries - 1) {
-        const delay = Math.pow(2, attempt) * 100;
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 100));
       }
     }
   }
-  
   return { error: lastError };
 };
 
 export const fetchPinHash = async (userId: string) => {
   try {
-    const result = await supabase.from('vault_pins').select('pin_hash').eq('user_id', userId).maybeSingle();
-    if (result.error) {
-      console.error('[Supabase] fetchPinHash error:', result.error.message);
-    }
+    const result = await supabase
+      .from('notesvault')
+      .select('id, pin_hash')
+      .eq('user_id', userId)
+      .eq('type', 'pin')
+      .maybeSingle();
+    if (result.error) console.error('[Supabase] fetchPinHash error:', result.error.message);
     return result;
   } catch (err) {
     console.error('[Supabase] fetchPinHash exception:', err);
@@ -206,22 +230,20 @@ export const fetchPinHash = async (userId: string) => {
 };
 
 export const deletePinHash = async (userId: string) => {
-  const result = await supabase.from('vault_pins').delete().eq('user_id', userId);
-  if (result.error) {
-    console.error('[Supabase] deletePinHash error:', result.error.message);
-  }
+  const result = await supabase
+    .from('notesvault')
+    .delete()
+    .eq('user_id', userId)
+    .eq('type', 'pin');
+  if (result.error) console.error('[Supabase] deletePinHash error:', result.error.message);
   return result;
 };
 
 export const validateCurrentSession = async () => {
   const { data } = await supabase.auth.getSession();
   const sessionUser = data?.session?.user;
-  if (!sessionUser) {
-    throw new Error('No session available');
-  }
+  if (!sessionUser) throw new Error('No session available');
   const token = data.session?.access_token;
-  if (!token) {
-    throw new Error('No session token');
-  }
+  if (!token) throw new Error('No session token');
   return { user: sessionUser, token };
 };

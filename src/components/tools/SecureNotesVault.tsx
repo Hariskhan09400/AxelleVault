@@ -1,19 +1,29 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  Shield, Lock, Unlock, Trash2, Plus, AlertTriangle, Eye, EyeOff,
+  Shield, Lock, Unlock, Trash2, Plus, AlertTriangle, Eye, EyeOff, Settings,
 } from 'lucide-react';
-import {
-  fetchEncryptedNotes, saveEncryptedNote, deleteEncryptedNote,
-  fetchPinHash, savePinHash, deletePinHash, deleteAllUserNotes,
-  supabase, EncryptedNote,
-} from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 
-// ─── Session keys (cleared when tab closes) ───────────────────────────────────
-const SS_UNLOCKED = 'vnote_unlocked'; // value = user_id
-const SS_PIN      = 'vnote_pin';      // value = raw pin
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface EncryptedNote {
+  id: string;
+  user_id: string;
+  encrypted_content: string;
+  iv: string;
+  salt: string;
+  created_at: string;
+}
 
-// ─── Crypto ───────────────────────────────────────────────────────────────────
+interface SecureNotesVaultProps {
+  userId?: string;
+  userEmail?: string;
+}
 
+// ─── Session Storage Keys ────────────────────────────────────────────────────
+const SS_UNLOCKED = 'vnote_unlocked';
+const SS_PIN      = 'vnote_pin';
+
+// ─── Crypto Helpers ──────────────────────────────────────────────────────────
 const generateSalt = (): string =>
   btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(16))));
 
@@ -22,7 +32,7 @@ const deriveKey = async (pin: string, salt: string): Promise<CryptoKey> => {
     'raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']
   );
   const bits = await window.crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: Uint8Array.from(atob(salt), c => c.charCodeAt(0)), iterations: 100000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: Uint8Array.from(atob(salt), c => c.charCodeAt(0)), iterations: 100_000, hash: 'SHA-256' },
     base, 256
   );
   return window.crypto.subtle.importKey('raw', bits, 'AES-GCM', false, ['encrypt', 'decrypt']);
@@ -51,58 +61,244 @@ const doDecrypt = async (content: string, iv: string, pin: string, salt: string)
   } catch { return null; }
 };
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Supabase Helpers — vault_pins ───────────────────────────────────────────
+const fetchPinRow = async (userId: string) => {
+  try {
+    return await supabase
+      .from('vault_pins')
+      .select('id, pin_hash')
+      .eq('user_id', userId)
+      .maybeSingle();
+  } catch (err) {
+    return { data: null, error: { message: String(err) } };
+  }
+};
 
-type Screen = 'loading' | 'create-pin' | 'unlock' | 'vault';
+const upsertPinHash = async (userId: string, pinHash: string, retries = 3) => {
+  let lastError = null;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const { data: existing, error: fetchErr } = await supabase
+        .from('vault_pins')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
 
-export const SecureNotesVault = () => {
-  const [screen,       setScreen]       = useState<Screen>('loading');
-  const [userId,       setUserId]       = useState<string | null>(null);
+      if (fetchErr && !fetchErr.message.includes('Lock')) {
+        return { error: fetchErr };
+      }
 
-  const [pin,          setPin]          = useState('');
-  const [pinConfirm,   setPinConfirm]   = useState('');
-  const activePinRef = useRef('');
+      if (existing?.id) {
+        const { error } = await supabase
+          .from('vault_pins')
+          .update({ pin_hash: pinHash, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        if (!error) return { error: null };
+        lastError = error;
+      } else {
+        const { error } = await supabase
+          .from('vault_pins')
+          .insert({ user_id: userId, pin_hash: pinHash });
+        if (!error) return { error: null };
+        lastError = error;
+      }
 
+      // If it's a lock error, wait and retry
+      if (lastError?.message?.includes('Lock')) {
+        console.warn(`[Vault] Lock conflict on attempt ${attempt + 1}, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+        continue;
+      }
+      
+      return { error: lastError };
+    } catch (e) {
+      lastError = e;
+      if (attempt < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 300 * (attempt + 1)));
+      }
+    }
+  }
+
+  return { error: lastError };
+};
+
+const deletePinRow = (userId: string) =>
+  supabase.from('vault_pins').delete().eq('user_id', userId);
+
+// ─── Supabase Helpers — encrypted_notes ───────────────────────────────────────
+const fetchNotes = (userId: string) =>
+  supabase
+    .from('encrypted_notes')
+    .select('id, user_id, encrypted_content, iv, salt, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+const insertNote = (userId: string, encrypted_content: string, iv: string, salt: string) =>
+  supabase.from('encrypted_notes').insert({ user_id: userId, encrypted_content, iv, salt });
+
+const removeNote = (noteId: string) =>
+  supabase.from('encrypted_notes').delete().eq('id', noteId);
+
+const removeAllNotes = (userId: string) =>
+  supabase.from('encrypted_notes').delete().eq('user_id', userId);
+
+// ─── PinPad ───────────────────────────────────────────────────────────────────
+interface PinPadProps {
+  title: string;
+  subtitle?: string;
+  onComplete: (pin: string) => void;
+  error?: string;
+  loading?: boolean;
+  onOptionsClick?: () => void;
+  showOptions?: boolean;
+}
+
+const PinPad = ({ title, subtitle, onComplete, error, loading, onOptionsClick, showOptions }: PinPadProps) => {
+  const [entered, setEntered] = useState('');
+  const MAX = 4;
+  const submittedRef = useRef(false);
+
+  useEffect(() => {
+    if (error) { setEntered(''); submittedRef.current = false; }
+  }, [error]);
+
+  const handleKey = useCallback((k: string) => {
+    if (loading || submittedRef.current) return;
+    if (k === 'del') { setEntered(p => p.slice(0, -1)); return; }
+    if (entered.length >= MAX) return;
+    const next = entered + k;
+    setEntered(next);
+    if (next.length === MAX) {
+      submittedRef.current = true;
+      setTimeout(() => {
+        onComplete(next);
+        setEntered('');
+        submittedRef.current = false;
+      }, 150);
+    }
+  }, [entered, loading, onComplete]);
+
+  const keys = [['1','2','3'],['4','5','6'],['7','8','9'],['','0','del']];
+
+  return (
+    <div style={S.pinWrap}>
+      <div style={S.pinHeader}>
+        <div style={S.pinShieldWrap}><Shield size={28} color="#e63950" /></div>
+        <div style={S.pinTitle}>{title}</div>
+        {subtitle && <div style={S.pinSubtitle}>{subtitle}</div>}
+      </div>
+      <div style={S.dotsRow}>
+        {Array.from({ length: MAX }).map((_, i) => (
+          <div key={i} style={{ ...S.dot, ...(i < entered.length ? S.dotFilled : {}) }} />
+        ))}
+      </div>
+      {error && (
+        <div style={S.pinError}>
+          <AlertTriangle size={13} color="#e63950" /><span>{error}</span>
+        </div>
+      )}
+      {loading && <div style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>Please wait...</div>}
+      <div style={S.keypad}>
+        {keys.map((row, ri) => (
+          <div key={ri} style={S.keyRow}>
+            {row.map((k, ki) => {
+              if (!k) return <div key={ki} style={S.keyEmpty} />;
+              if (k === 'del') return (
+                <button key={ki} style={S.keyDel} onClick={() => handleKey('del')} disabled={loading}>
+                  <span style={{ fontSize: 20, color: '#e63950' }}>⌫</span>
+                </button>
+              );
+              return (
+                <button key={ki} style={S.keyBtn} onClick={() => handleKey(k)} disabled={loading}>
+                  <span style={S.keyNum}>{k}</span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      {showOptions && onOptionsClick && (
+        <button style={S.optionsBtn} onClick={onOptionsClick}>Options</button>
+      )}
+    </div>
+  );
+};
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+type Screen = 'loading' | 'create-pin' | 'confirm-pin' | 'unlock' | 'vault';
+type Modal  = null | 'options' | 'change-current' | 'change-new' | 'change-confirm' | 'forgot';
+
+export const SecureNotesVault = ({ userId, userEmail }: SecureNotesVaultProps) => {
+  const [screen,         setScreen]         = useState<Screen>('loading');
+  const [modal,          setModal]          = useState<Modal>(null);
   const [pinError,       setPinError]       = useState('');
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [isLocked,       setIsLocked]       = useState(false);
   const [lastUnlockTime, setLastUnlockTime] = useState<Date | null>(null);
-
+  const [loading,        setLoading]        = useState(false);
+  const [flashMsg,       setFlashMsg]       = useState('');
+  const [flashType,      setFlashType]      = useState<'ok' | 'err'>('ok');
   const [notes,          setNotes]          = useState<EncryptedNote[]>([]);
   const [newNote,        setNewNote]        = useState('');
   const [decryptedNotes, setDecryptedNotes] = useState<Record<string, string>>({});
-  const [loading,        setLoading]        = useState(false);
-  const [error,          setError]          = useState('');
+  const [deleteTarget,   setDeleteTarget]   = useState<string | null>(null);
+  const [changePinError, setChangePinError] = useState('');
+  const [newPinTemp,     setNewPinTemp]     = useState('');
+  const [forgotPw,       setForgotPw]       = useState('');
+  const [forgotError,    setForgotError]    = useState('');
+  const [forgotLoading,  setForgotLoading]  = useState(false);
+  const [showForgotPw,   setShowForgotPw]   = useState(false);
+  const [firstPin,       setFirstPin]       = useState('');
+  const [pinKey,         setPinKey]         = useState(0);
 
-  const [deleteConfirm,        setDeleteConfirm]        = useState<string | null>(null);
-  const [showForgotPin,        setShowForgotPin]        = useState(false);
-  const [forgotPinConfirmText, setForgotPinConfirmText] = useState('');
-  const [forgotPinStep,        setForgotPinStep]        = useState<1 | 2>(1);
+  // ✅ useAuth bilkul nahi — directly supabase session
+  const activePinRef  = useRef('');
+  const userIdRef     = useRef<string>('');
+  const userEmailRef  = useRef<string>('');
+  const processingRef = useRef(false);
+  const timerRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const INACTIVITY    = 5 * 60 * 1000;
 
-  const INACTIVITY_MS = 5 * 60 * 1000;
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flash = (msg: string, type: 'ok' | 'err' = 'ok', ms = 2500) => {
+    setFlashMsg(msg); setFlashType(type);
+    setTimeout(() => setFlashMsg(''), ms);
+  };
 
-  // ── Init: get session → check PIN → decide screen ────────────────────────────
+  // ─── Init: directly Supabase getSession / Props-based fallback ───────────
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
+    const init = async () => {
       try {
-        // supabase.auth.getSession() reads from localStorage — no network, instant
-        const { data } = await supabase.auth.getSession();
-        if (cancelled) return;
+        if (userId) {
+          userIdRef.current = userId;
+          userEmailRef.current = userEmail ?? '';
+          console.log('[Vault] User props provided:', userEmail, userId);
+        } else {
+          // ✅ useAuth/AuthContext NAHI — seedha Supabase se session lo
+          const { data: { session }, error } = await supabase.auth.getSession();
+          if (cancelled) return;
 
-        const uid = data?.session?.user?.id ?? null;
+          if (error || !session?.user) {
+            console.warn('[Vault] No session found');
+            setScreen('create-pin');
+            return;
+          }
+
+          userIdRef.current = session.user.id;
+          userEmailRef.current = session.user.email ?? '';
+          console.log('[Vault] Session found:', userEmailRef.current, userIdRef.current);
+        }
+
+        const uid = userIdRef.current;
         if (!uid) {
-          // No user logged in — show nothing useful
-          setScreen('create-pin'); // will show "please sign in" via pinError
-          setPinError('Please sign in to access your vault.');
+          console.warn('[Vault] No user id set');
+          setScreen('create-pin');
           return;
         }
 
-        setUserId(uid);
-
-        // Check if vault was already unlocked this tab session
+        // Fast path — session storage
         const ssUid = sessionStorage.getItem(SS_UNLOCKED);
         const ssPin = sessionStorage.getItem(SS_PIN);
         if (ssUid === uid && ssPin) {
@@ -112,478 +308,546 @@ export const SecureNotesVault = () => {
           return;
         }
 
-        // Check if PIN exists in DB
-        const { data: pinData, error: pinErr } = await fetchPinHash(uid);
+        // PIN check
+        const { data: pinRow, error: pinErr } = await fetchPinRow(uid);
         if (cancelled) return;
 
         if (pinErr) {
-          setPinError('Unable to reach vault. Check your connection.');
+          console.error('[Vault] PIN fetch error:', pinErr.message);
           setScreen('create-pin');
           return;
         }
 
-        setScreen(pinData?.pin_hash ? 'unlock' : 'create-pin');
-      } catch (e) {
+        console.log('[Vault] pinRow found:', pinRow);
+        setScreen(pinRow?.pin_hash ? 'unlock' : 'create-pin');
+
+      } catch (err) {
         if (!cancelled) {
-          setPinError('Vault init error: ' + String(e));
+          console.error('[Vault] Init error:', err);
           setScreen('create-pin');
         }
       }
-    })();
+    };
+
+    init();
 
     return () => { cancelled = true; };
   }, []);
 
-  // ── Load notes when on vault screen ──────────────────────────────────────────
+  // ─── Load notes ───────────────────────────────────────────────────────────
   const refreshNotes = useCallback(async () => {
-    if (!userId) return;
-    const { data } = await fetchEncryptedNotes(userId);
-    setNotes(data || []);
-  }, [userId]);
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const { data } = await fetchNotes(uid);
+    setNotes((data as EncryptedNote[]) || []);
+  }, []);
 
   useEffect(() => {
-    if (screen !== 'vault' || !userId) return;
+    if (screen !== 'vault') return;
+    const uid = userIdRef.current;
+    if (!uid) return;
     (async () => {
       setLoading(true);
-      const { data, error } = await fetchEncryptedNotes(userId);
-      if (error) { setError('Unable to load notes: ' + error.message); setNotes([]); }
-      else        { setNotes(data || []); setDecryptedNotes({}); }
+      const { data, error } = await fetchNotes(uid);
+      if (error) flash('Notes load failed: ' + error.message, 'err');
+      else { setNotes((data as EncryptedNote[]) || []); setDecryptedNotes({}); }
       setLoading(false);
     })();
-  }, [screen, userId]);
+  }, [screen]);
 
-  // ── Inactivity auto-lock ──────────────────────────────────────────────────────
+  // ─── Inactivity lock ──────────────────────────────────────────────────────
   const lockVault = useCallback((reason?: string) => {
     setScreen('unlock');
-    setPin('');
     activePinRef.current = '';
     setDecryptedNotes({});
     setPinError(reason ?? '');
     setFailedAttempts(0);
     sessionStorage.removeItem(SS_UNLOCKED);
     sessionStorage.removeItem(SS_PIN);
+    setModal(null);
+    setPinKey(k => k + 1);
   }, []);
 
   useEffect(() => {
     if (screen !== 'vault') return;
     const reset = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => lockVault('Session locked due to inactivity.'), INACTIVITY_MS);
+      timerRef.current = setTimeout(() => lockVault('Locked due to inactivity.'), INACTIVITY);
     };
-    window.addEventListener('click',    reset);
+    window.addEventListener('click', reset);
     window.addEventListener('keypress', reset);
     reset();
     return () => {
-      window.removeEventListener('click',    reset);
+      window.removeEventListener('click', reset);
       window.removeEventListener('keypress', reset);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [screen, lockVault]);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
-  const getPin = () => activePinRef.current || sessionStorage.getItem(SS_PIN) || '';
-
+  // ─── Helpers ──────────────────────────────────────────────────────────────
   const saveSession = (uid: string, p: string) => {
     activePinRef.current = p;
     sessionStorage.setItem(SS_UNLOCKED, uid);
     sessionStorage.setItem(SS_PIN, p);
   };
 
-  // ── Create PIN ────────────────────────────────────────────────────────────────
-  const handleCreatePin = async () => {
+  const getPin = () => activePinRef.current || sessionStorage.getItem(SS_PIN) || '';
+
+  // ─── PIN Creation ─────────────────────────────────────────────────────────
+  const handleCreatePin = useCallback((pin: string) => {
+    if (processingRef.current) return;
+    console.log('[Vault] Step 1: First PIN entered');
     setPinError('');
-    if (!pin || pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
-      setPinError('PIN must be 4–6 digits only.'); return;
+    setFirstPin(pin);
+    setPinKey(k => k + 1);
+    setScreen('confirm-pin');
+  }, []);
+
+  const handleConfirmPin = useCallback(async (pin: string) => {
+    if (processingRef.current) return;
+    
+    if (pin !== firstPin) {
+      setPinError("PINs don't match. Try again.");
+      setFirstPin('');
+      setPinKey(k => k + 1);
+      setScreen('create-pin');
+      return;
     }
-    if (pin !== pinConfirm) { setPinError('PINs do not match.'); return; }
-    if (!userId || loading) return;
 
-    try {
-      setLoading(true);
-      const { error } = await savePinHash(userId, await hashPin(pin), 3);
-      if (error) {
-        setPinError('Failed to save PIN: ' + String(error.message || error)); return;
+    // ✅ Session fresh lo agar userIdRef empty hai
+    let uid = userIdRef.current;
+    if (!uid) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          uid = session.user.id;
+          userIdRef.current    = uid;
+          userEmailRef.current = session.user.email ?? '';
+        } else {
+          setPinError('Not signed in. Please login again.');
+          return;
+        }
+      } catch (sessionErr) {
+        setPinError('Failed to verify session. Please try again.');
+        return;
       }
-      saveSession(userId, pin);
-      setPin(''); setPinConfirm('');
-      setLastUnlockTime(new Date());
-      setScreen('vault');
-    } catch (e) {
-      setPinError('Error: ' + String(e));
-    } finally { setLoading(false); }
-  };
+    }
 
-  // ── Unlock ────────────────────────────────────────────────────────────────────
-  const handleUnlockVault = async () => {
+    processingRef.current = true;
+    setLoading(true);
     setPinError('');
-    if (isLocked)        { setPinError('Too many failed attempts. Try again in 5 min.'); return; }
-    if (!userId || !pin) { setPinError('Enter your PIN.'); return; }
 
     try {
-      setLoading(true);
-      const { data } = await fetchPinHash(userId);
-      if (!data?.pin_hash) { setPinError('PIN not found. Create a new one.'); return; }
+      console.log('[Vault] Step 2: Saving PIN for:', uid);
+      const pinHash = await hashPin(pin);
+      const { error } = await upsertPinHash(uid, pinHash);
 
-      if (await hashPin(pin) !== data.pin_hash) {
+      if (error) {
+        console.error('[Vault] PIN save error:', error);
+        const errMsg = (error as any).message || String(error);
+        if (errMsg.includes('Lock')) {
+          setPinError('Server busy. Please try again.');
+        } else {
+          setPinError('Failed to save PIN: ' + errMsg);
+        }
+        setFirstPin('');
+        setPinKey(k => k + 1);
+        setScreen('create-pin');
+        return;
+      }
+
+      console.log('[Vault] ✅ PIN saved! Opening vault...');
+      saveSession(uid, pin);
+      setFirstPin('');
+      setLastUnlockTime(new Date());
+      setPinKey(k => k + 1);
+      setScreen('vault');
+
+    } catch (e) {
+      console.error('[Vault] Confirm PIN exception:', e);
+      setPinError('Error: ' + String(e));
+      setFirstPin('');
+      setPinKey(k => k + 1);
+      setScreen('create-pin');
+    } finally {
+      setLoading(false);
+      processingRef.current = false;
+    }
+  }, [firstPin]);
+
+  // ─── Unlock ───────────────────────────────────────────────────────────────
+  const handleUnlock = useCallback(async (pin: string) => {
+    if (processingRef.current) return;
+    if (isLocked) { setPinError('Too many attempts. Wait 5 min.'); return; }
+
+    const uid = userIdRef.current;
+    if (!uid) { setPinError('Not signed in.'); return; }
+
+    processingRef.current = true;
+    setLoading(true);
+    setPinError('');
+
+    try {
+      const { data: pinRow, error } = await fetchPinRow(uid);
+      if (error) { setPinError('Error fetching PIN.'); return; }
+      if (!pinRow?.pin_hash) { setScreen('create-pin'); return; }
+
+      if (await hashPin(pin) !== pinRow.pin_hash) {
         const att = failedAttempts + 1;
         setFailedAttempts(att);
+        setPinKey(k => k + 1);
         if (att >= 5) {
           setIsLocked(true);
           setTimeout(() => { setIsLocked(false); setFailedAttempts(0); }, 5 * 60 * 1000);
-          setPinError('Too many failed attempts. Locked for 5 minutes.');
+          setPinError('Locked 5 min — too many failed attempts.');
         } else {
           setPinError(`Wrong PIN. ${5 - att} attempt${5 - att !== 1 ? 's' : ''} left.`);
         }
         return;
       }
 
-      saveSession(userId, pin);
+      saveSession(uid, pin);
       setFailedAttempts(0);
       setLastUnlockTime(new Date());
-      setPin('');
       setScreen('vault');
+
     } catch (e) {
       setPinError('Error: ' + String(e));
-    } finally { setLoading(false); }
-  };
+      setPinKey(k => k + 1);
+    } finally {
+      setLoading(false);
+      processingRef.current = false;
+    }
+  }, [isLocked, failedAttempts]);
 
-  // ── Save note ─────────────────────────────────────────────────────────────────
-  const handleSaveNote = async () => {
-    if (!userId) return;
-    if (!newNote.trim()) { setError('Please type a note.'); return; }
-    const p = getPin();
-    if (!p) { setError('Session expired. Lock and re-unlock vault.'); return; }
-
+  // ─── Change PIN ───────────────────────────────────────────────────────────
+  const handleChangeVerifyCurrent = async (pin: string) => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    setChangePinError(''); setLoading(true);
     try {
-      setLoading(true); setError('');
-      const salt = notes.length > 0 ? notes[0].salt : generateSalt();
-      const enc  = await doEncrypt(newNote.trim(), p, salt);
-      const { error } = await saveEncryptedNote(userId, enc.content, enc.iv, salt);
-      if (error) { setError('Failed to save: ' + error.message); return; }
-      setNewNote('');
-      await refreshNotes();
-    } catch (e) { setError('Error: ' + String(e)); }
-    finally     { setLoading(false); }
+      const { data } = await fetchPinRow(uid);
+      if (!data?.pin_hash || await hashPin(pin) !== data.pin_hash) {
+        setChangePinError('Wrong current PIN.'); setPinKey(k => k + 1); return;
+      }
+      setModal('change-new');
+    } catch (e) { setChangePinError('Error: ' + String(e)); }
+    finally { setLoading(false); }
   };
 
-  // ── Decrypt note ──────────────────────────────────────────────────────────────
+  const handleChangeNewPin = (pin: string) => {
+    setNewPinTemp(pin); setModal('change-confirm'); setChangePinError('');
+  };
+
+  const handleChangeConfirmPin = async (pin: string) => {
+    if (pin !== newPinTemp) {
+      setChangePinError("PINs don't match.");
+      setModal('change-new'); setNewPinTemp(''); return;
+    }
+    const uid = userIdRef.current;
+    if (!uid) return;
+    setLoading(true); setChangePinError('');
+    try {
+      const oldPin = getPin();
+      const { data: notesData } = await fetchNotes(uid);
+      const allNotes = (notesData as EncryptedNote[]) || [];
+      for (const note of allNotes) {
+        const dec = await doDecrypt(note.encrypted_content, note.iv, oldPin, note.salt);
+        if (dec === null) continue;
+        const newSalt = generateSalt();
+        const enc = await doEncrypt(dec, pin, newSalt);
+        await removeNote(note.id);
+        await insertNote(uid, enc.content, enc.iv, newSalt);
+      }
+      await upsertPinHash(uid, await hashPin(pin));
+      saveSession(uid, pin);
+      setNewPinTemp(''); setModal(null);
+      await refreshNotes();
+      flash('✅ PIN changed successfully!');
+    } catch (e) { setChangePinError('Error: ' + String(e)); }
+    finally { setLoading(false); }
+  };
+
+  // ─── Forgot / Reset ───────────────────────────────────────────────────────
+  const handleForgotReset = async () => {
+    if (!forgotPw.trim()) { setForgotError('Enter your account password.'); return; }
+    const uid   = userIdRef.current;
+    const email = userEmailRef.current;
+    if (!email || !uid) { setForgotError('User not found.'); return; }
+    setForgotLoading(true); setForgotError('');
+    try {
+      const { error: authErr } = await supabase.auth.signInWithPassword({ email, password: forgotPw });
+      if (authErr) { setForgotError('Wrong password. Try again.'); return; }
+      await removeAllNotes(uid);
+      await deletePinRow(uid);
+      sessionStorage.removeItem(SS_UNLOCKED);
+      sessionStorage.removeItem(SS_PIN);
+      activePinRef.current = '';
+      setNotes([]); setDecryptedNotes({});
+      setForgotPw(''); setModal(null);
+      setPinError('Vault reset. Create a new PIN.');
+      setFirstPin('');
+      setPinKey(k => k + 1);
+      setScreen('create-pin');
+    } catch (e) { setForgotError('Error: ' + String(e)); }
+    finally { setForgotLoading(false); }
+  };
+
+  // ─── Notes ────────────────────────────────────────────────────────────────
+  const handleSaveNote = async () => {
+    const uid = userIdRef.current;
+    if (!uid || !newNote.trim()) { flash('Type a note first.', 'err'); return; }
+    const p = getPin();
+    if (!p) { flash('Session expired. Re-unlock.', 'err'); return; }
+    try {
+      setLoading(true);
+      const salt = generateSalt();
+      const enc  = await doEncrypt(newNote.trim(), p, salt);
+      const { error } = await insertNote(uid, enc.content, enc.iv, salt);
+      if (error) { flash('Save failed: ' + error.message, 'err'); return; }
+      setNewNote(''); await refreshNotes(); flash('Note saved!');
+    } catch (e) { flash('Error: ' + String(e), 'err'); }
+    finally { setLoading(false); }
+  };
+
   const handleDecryptNote = async (note: EncryptedNote) => {
     const p = getPin();
-    if (!p) { setError('Session expired. Lock and re-unlock vault.'); return; }
+    if (!p) { flash('Session expired.', 'err'); return; }
     const dec = await doDecrypt(note.encrypted_content, note.iv, p, note.salt);
-    if (dec === null) { setError('Decrypt failed. Wrong PIN?'); return; }
+    if (dec === null) { flash('Decrypt failed. Wrong PIN?', 'err'); return; }
     setDecryptedNotes(prev => ({ ...prev, [note.id]: dec }));
-    setError('');
   };
 
   const handleHideNote = (id: string) =>
     setDecryptedNotes(prev => { const u = { ...prev }; delete u[id]; return u; });
 
-  // ── Delete note ───────────────────────────────────────────────────────────────
   const handleDeleteNote = async (noteId: string) => {
-    if (!userId) return;
     try {
       setLoading(true);
-      const { error } = await deleteEncryptedNote(noteId);
-      if (error) { setError('Delete failed: ' + error.message); return; }
-      setDeleteConfirm(null);
-      handleHideNote(noteId);
-      await refreshNotes();
-    } catch (e) { setError('Error: ' + String(e)); }
-    finally     { setLoading(false); }
+      await removeNote(noteId);
+      setDeleteTarget(null); handleHideNote(noteId); await refreshNotes();
+    } catch (e) { flash('Error: ' + String(e), 'err'); }
+    finally { setLoading(false); }
   };
 
-  // ── Forgot PIN ────────────────────────────────────────────────────────────────
-  const handleForgotPin = async () => {
-    if (!userId) return;
-    try {
-      setLoading(true);
-      const { error: e1 } = await deleteAllUserNotes(userId); if (e1) throw e1;
-      const { error: e2 } = await deletePinHash(userId);      if (e2) throw e2;
-      sessionStorage.removeItem(SS_UNLOCKED);
-      sessionStorage.removeItem(SS_PIN);
-      activePinRef.current = '';
-      setNotes([]); setDecryptedNotes({});
-      setPin(''); setPinConfirm('');
-      setShowForgotPin(false); setForgotPinStep(1); setForgotPinConfirmText('');
-      setPinError('Vault reset. Create a new PIN to continue.');
-      setScreen('create-pin');
-    } catch (e) { setPinError('Reset failed: ' + String(e)); }
-    finally     { setLoading(false); }
-  };
+  // ─── Sub-components ───────────────────────────────────────────────────────
+  const OptionsModal = ({ fromVault = false }) => (
+    <div style={S.modalBackdrop}>
+      <div style={S.optionsModal}>
+        <div style={S.optionsTitle}>{fromVault ? 'Vault Options' : 'Options'}</div>
+        <button style={S.optionBtn} onClick={() => { setModal('change-current'); setChangePinError(''); }}>
+          Change Passcode
+        </button>
+        <button
+          style={{ ...S.optionBtn, ...(fromVault ? { color: '#e63950', borderColor: '#e63950' } : {}) }}
+          onClick={() => { setModal('forgot'); setForgotError(''); setForgotPw(''); }}>
+          {fromVault ? 'Reset Vault' : 'Forgot Passcode'}
+        </button>
+        <button style={S.optionCancelBtn} onClick={() => setModal(null)}>Cancel</button>
+      </div>
+    </div>
+  );
 
-  // ─── RENDER ───────────────────────────────────────────────────────────────────
+  const ChangePinModals = () => (
+    <>
+      {modal === 'change-current' && (
+        <div style={S.modalBackdrop}><div style={S.pinModalWrap}>
+          <PinPad key={`cc-${pinKey}`} title="Current PIN" subtitle="Enter your current passcode"
+            onComplete={handleChangeVerifyCurrent} error={changePinError} loading={loading} />
+          <button style={S.cancelLink} onClick={() => setModal(null)}>Cancel</button>
+        </div></div>
+      )}
+      {modal === 'change-new' && (
+        <div style={S.modalBackdrop}><div style={S.pinModalWrap}>
+          <PinPad key={`cn-${pinKey}`} title="New PIN" subtitle="Choose a new 4-digit passcode"
+            onComplete={handleChangeNewPin} error={changePinError} loading={loading} />
+          <button style={S.cancelLink} onClick={() => setModal(null)}>Cancel</button>
+        </div></div>
+      )}
+      {modal === 'change-confirm' && (
+        <div style={S.modalBackdrop}><div style={S.pinModalWrap}>
+          <PinPad key={`cf-${pinKey}`} title="Confirm New PIN" subtitle="Re-enter your new passcode"
+            onComplete={handleChangeConfirmPin} error={changePinError} loading={loading} />
+          <button style={S.cancelLink} onClick={() => setModal(null)}>Cancel</button>
+        </div></div>
+      )}
+    </>
+  );
 
-  // ── Loading ──────────────────────────────────────────────────────────────────
+  const ForgotModal = () => (
+    <div style={S.modalBackdrop}>
+      <div style={S.forgotModal}>
+        <div style={S.forgotIcon}>⚠️</div>
+        <div style={S.forgotTitle}>Reset Vault</div>
+        <div style={S.forgotBody}>
+          Enter your <strong>AxelleVault account password</strong> to verify.<br /><br />
+          <span style={{ color: '#e63950' }}>All notes will be permanently deleted.</span>
+        </div>
+        <input
+          type={showForgotPw ? 'text' : 'password'}
+          placeholder="Account password"
+          value={forgotPw}
+          onChange={e => setForgotPw(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleForgotReset()}
+          style={S.forgotInput}
+        />
+        <button style={S.showPwBtn} onClick={() => setShowForgotPw(v => !v)}>
+          {showForgotPw ? '🙈 Hide' : '👁 Show'}
+        </button>
+        {forgotError && (
+          <div style={S.forgotError}><AlertTriangle size={13} color="#e63950" /> {forgotError}</div>
+        )}
+        <button
+          style={{ ...S.optionBtn, background: '#e63950', color: '#fff', marginTop: 12 }}
+          onClick={handleForgotReset} disabled={forgotLoading}>
+          {forgotLoading ? 'Verifying...' : '🗑 Reset Vault'}
+        </button>
+        <button style={S.optionCancelBtn} onClick={() => { setModal(null); setForgotPw(''); }}>Cancel</button>
+      </div>
+    </div>
+  );
+
+  // ─── Screens ──────────────────────────────────────────────────────────────
   if (screen === 'loading') {
     return (
-      <div className="bg-gray-900/50 border border-cyan-500/30 rounded-lg p-6">
-        <div className="flex items-center gap-3">
-          <Shield className="w-5 h-5 text-cyan-400 animate-pulse" />
-          <h3 className="text-xl font-semibold text-white">Secure Notes Vault</h3>
-        </div>
+      <div style={S.loadingWrap}>
+        <Shield size={32} color="#e63950" />
+        <div style={S.loadingText}>Initializing Vault...</div>
       </div>
     );
   }
 
-  // ── Create PIN ───────────────────────────────────────────────────────────────
   if (screen === 'create-pin') {
     return (
-      <div className="bg-gray-900/50 border border-cyan-500/30 rounded-lg p-6 shadow-lg">
-        <div className="flex items-center gap-2 mb-2">
-          <Shield className="w-6 h-6 text-cyan-400" />
-          <h3 className="text-2xl font-bold text-white">Secure Notes Vault</h3>
-        </div>
-        <p className="text-gray-400 text-xs mb-6">End-to-end encrypted • PIN never leaves your device</p>
-
-        <div className="flex items-center gap-2 mb-4">
-          <Lock className="w-5 h-5 text-rose-400" />
-          <h4 className="text-lg font-semibold text-white">Create Your Vault PIN</h4>
-        </div>
-        <p className="text-gray-300 text-sm mb-5">
-          Choose a 4–6 digit PIN to encrypt your notes. This PIN is required to view your notes — it is never stored on any server.
-        </p>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">PIN (4–6 digits)</label>
-            <input
-              type="password" inputMode="numeric" maxLength={6}
-              value={pin}
-              onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={e => e.key === 'Enter' && handleCreatePin()}
-              placeholder="••••••"
-              autoFocus
-              className="w-full bg-gray-800/60 border border-cyan-500/30 rounded-lg px-4 py-3 text-white text-2xl tracking-[0.5em] focus:border-cyan-400 focus:outline-none transition placeholder:text-gray-600"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Confirm PIN</label>
-            <input
-              type="password" inputMode="numeric" maxLength={6}
-              value={pinConfirm}
-              onChange={e => setPinConfirm(e.target.value.replace(/\D/g, ''))}
-              onKeyDown={e => e.key === 'Enter' && handleCreatePin()}
-              placeholder="••••••"
-              className="w-full bg-gray-800/60 border border-cyan-500/30 rounded-lg px-4 py-3 text-white text-2xl tracking-[0.5em] focus:border-cyan-400 focus:outline-none transition placeholder:text-gray-600"
-            />
-          </div>
-
-          {pinError && (
-            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" /> {pinError}
-            </div>
-          )}
-
-          <button
-            onClick={handleCreatePin}
-            disabled={!pin || !pinConfirm || loading}
-            className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-cyan-500 to-green-500 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition hover:opacity-90 text-base"
-          >
-            {loading ? 'Creating vault...' : '🔐 Create PIN & Open Vault'}
-          </button>
-        </div>
-
-        <p className="text-xs text-gray-600 mt-4 text-center">
-          ⚠️ If you forget your PIN, all notes will be permanently deleted. There is no recovery option.
-        </p>
-      </div>
+      <PinPad
+        key={`create-${pinKey}`}
+        title="Create Your PIN"
+        subtitle="Choose a 4-digit PIN to protect your vault"
+        onComplete={handleCreatePin}
+        error={pinError}
+        loading={loading}
+      />
     );
   }
 
-  // ── Unlock ───────────────────────────────────────────────────────────────────
+  if (screen === 'confirm-pin') {
+    return (
+      <PinPad
+        key={`confirm-${pinKey}`}
+        title="Confirm Your PIN"
+        subtitle="Enter the same PIN again"
+        onComplete={handleConfirmPin}
+        error={pinError}
+        loading={loading}
+      />
+    );
+  }
+
   if (screen === 'unlock') {
     return (
-      <div className="bg-gray-900/50 border border-cyan-500/30 rounded-lg p-6 shadow-lg">
-        <div className="flex items-center gap-2 mb-2">
-          <Shield className="w-6 h-6 text-cyan-400" />
-          <h3 className="text-2xl font-bold text-white">Secure Notes Vault</h3>
-        </div>
-        <p className="text-gray-400 text-xs mb-6">End-to-end encrypted • PIN never leaves your device</p>
-
-        <div className="flex items-center gap-2 mb-4">
-          <Lock className="w-5 h-5 text-yellow-400" />
-          <h4 className="text-lg font-semibold text-white">Enter PIN to Unlock</h4>
-        </div>
-
-        <div className="space-y-4">
-          <input
-            type="password" inputMode="numeric" maxLength={6}
-            value={pin}
-            onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
-            onKeyDown={e => e.key === 'Enter' && !isLocked && handleUnlockVault()}
-            placeholder="••••••"
-            disabled={isLocked}
-            autoFocus
-            className="w-full bg-gray-800/60 border border-cyan-500/30 rounded-lg px-4 py-4 text-white text-3xl tracking-[0.6em] text-center focus:border-cyan-400 focus:outline-none transition disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-gray-600"
-          />
-
-          {pinError && (
-            <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0" /> {pinError}
-            </div>
-          )}
-
-          <button
-            onClick={handleUnlockVault}
-            disabled={!pin || isLocked || loading}
-            className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-cyan-500 to-green-500 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition hover:opacity-90 text-base"
-          >
-            {loading ? 'Unlocking...' : '🔓 Unlock Vault'}
-          </button>
-
-          <button
-            onClick={() => { setShowForgotPin(true); setForgotPinStep(1); setForgotPinConfirmText(''); }}
-            className="w-full text-sm text-gray-500 hover:text-gray-300 transition pt-1"
-          >
-            Forgot PIN?
-          </button>
-        </div>
-
-        {/* Forgot PIN Modal */}
-        {showForgotPin && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/80 backdrop-blur-sm">
-            <div className="bg-gray-900 border border-red-500/40 rounded-xl p-6 w-full max-w-sm shadow-2xl">
-              <div className="flex items-center gap-2 mb-4">
-                <AlertTriangle className="w-6 h-6 text-red-400" />
-                <h4 className="text-lg font-semibold text-white">Reset Vault?</h4>
-              </div>
-              {forgotPinStep === 1 ? (
-                <>
-                  <p className="text-sm text-gray-300 mb-3">⚠️ This will permanently:</p>
-                  <ul className="text-sm text-red-300 space-y-1 mb-5 list-disc list-inside">
-                    <li>Delete ALL your encrypted notes</li>
-                    <li>Remove your current PIN</li>
-                    <li>This CANNOT be undone</li>
-                  </ul>
-                  <div className="flex gap-3">
-                    <button onClick={() => setShowForgotPin(false)} className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 transition text-sm">Cancel</button>
-                    <button onClick={() => setForgotPinStep(2)} className="flex-1 px-3 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition text-sm font-semibold">I understand, continue</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-gray-300 mb-3">Type <strong className="text-white">DELETE</strong> to confirm:</p>
-                  <input
-                    type="text" placeholder="Type DELETE"
-                    value={forgotPinConfirmText}
-                    onChange={e => setForgotPinConfirmText(e.target.value)}
-                    className="w-full bg-gray-800/60 border border-red-500/30 rounded-lg px-3 py-2 text-white mb-4 focus:border-red-400 focus:outline-none transition"
-                  />
-                  <div className="flex gap-3">
-                    <button onClick={() => { setForgotPinStep(1); setForgotPinConfirmText(''); setShowForgotPin(false); }} className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 transition text-sm">Cancel</button>
-                    <button
-                      onClick={handleForgotPin}
-                      disabled={forgotPinConfirmText !== 'DELETE' || loading}
-                      className="flex-1 px-3 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-                    >{loading ? 'Resetting...' : 'Reset Vault'}</button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <>
+        <PinPad
+          key={`unlock-${pinKey}`}
+          title="Enter PIN"
+          subtitle="Vault is locked"
+          onComplete={handleUnlock}
+          error={pinError}
+          loading={loading || isLocked}
+          showOptions
+          onOptionsClick={() => setModal('options')}
+        />
+        {modal === 'options' && <OptionsModal />}
+        {modal === 'forgot'  && <ForgotModal />}
+        <ChangePinModals />
+      </>
     );
   }
 
-  // ── Vault (unlocked) ─────────────────────────────────────────────────────────
+  // ─── Vault Screen ─────────────────────────────────────────────────────────
   return (
-    <div className="bg-gray-900/50 border border-cyan-500/30 rounded-lg p-6 shadow-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <Unlock className="w-6 h-6 text-green-400" />
+    <div style={S.vaultWrap}>
+      <div style={S.vaultHeader}>
+        <div style={S.vaultHeaderLeft}>
+          <Unlock size={20} color="#4ade80" />
           <div>
-            <h3 className="text-2xl font-bold text-white">Secure Notes Vault</h3>
-            <p className="text-xs text-gray-400">🔓 Unlocked{lastUnlockTime && ` • ${lastUnlockTime.toLocaleTimeString()}`}</p>
+            <div style={S.vaultTitle}>Secure Notes Vault</div>
+            <div style={S.vaultUnlockTime}>
+              🔓 Unlocked{lastUnlockTime && ` · ${lastUnlockTime.toLocaleTimeString()}`}
+            </div>
           </div>
         </div>
-        <button
-          onClick={() => lockVault()}
-          className="px-4 py-2 rounded-lg bg-yellow-500/20 border border-yellow-500/40 text-yellow-400 hover:bg-yellow-500/30 transition text-sm flex items-center gap-2"
-        >
-          <Lock className="w-4 h-4" /> Lock
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button style={S.settingsBtn} onClick={() => { setModal('options'); setChangePinError(''); }}>
+            <Settings size={15} />
+          </button>
+          <button style={S.lockBtn} onClick={() => lockVault()}>
+            <Lock size={14} /> Lock
+          </button>
+        </div>
       </div>
 
-      {/* Add Note */}
-      <div className="mb-6 space-y-3">
-        <div className="flex items-center gap-2">
-          <Plus className="w-4 h-4 text-cyan-400" />
-          <h4 className="text-sm font-semibold text-white">Add New Note</h4>
-        </div>
+      <div style={S.addNoteBox}>
+        <div style={S.addNoteLabel}><Plus size={14} color="#22d3ee" /> New Note</div>
         <textarea
           value={newNote}
           onChange={e => setNewNote(e.target.value)}
           placeholder="Type your secure note here..."
-          className="w-full h-24 bg-gray-800/60 border border-cyan-500/30 rounded-lg p-3 text-white focus:border-cyan-400 focus:outline-none transition resize-none"
+          style={S.textarea}
         />
-        <button
-          onClick={handleSaveNote}
-          disabled={!newNote.trim() || loading}
-          className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-green-500 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition hover:opacity-90"
-        >
+        <button onClick={handleSaveNote} disabled={!newNote.trim() || loading} style={S.saveBtn}>
           {loading ? 'Saving...' : 'Save Encrypted Note'}
         </button>
       </div>
 
-      {error && (
-        <div className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
+      {flashMsg && (
+        <div style={flashType === 'ok' ? S.successMsg : S.errorMsg}>
+          {flashType === 'err' && <AlertTriangle size={14} />} {flashMsg}
         </div>
       )}
 
-      {/* Notes List */}
-      <div className="space-y-3">
-        <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
-          {notes.length === 0 ? 'No notes yet' : `${notes.length} Encrypted Note${notes.length !== 1 ? 's' : ''}`}
-        </h4>
+      <div style={S.notesLabel}>
+        {notes.length === 0 ? 'No notes yet' : `${notes.length} Encrypted Note${notes.length !== 1 ? 's' : ''}`}
+      </div>
+      {loading && notes.length === 0 && <div style={S.loadingSmall}>Loading notes...</div>}
 
-        {loading && notes.length === 0 && (
-          <p className="text-xs text-gray-500 italic">Loading notes...</p>
-        )}
-
+      <div style={S.notesList}>
         {notes.map(note => (
-          <div key={note.id} className="bg-gray-800/60 border border-gray-700 rounded-lg p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <p className="text-xs text-gray-500">{new Date(note.created_at).toLocaleString()}</p>
-              <div className="flex items-center gap-2">
-                {decryptedNotes[note.id] ? (
-                  <button onClick={() => handleHideNote(note.id)} className="text-cyan-400 hover:text-cyan-200 text-xs flex items-center gap-1 transition border border-cyan-500/30 rounded px-2 py-1">
-                    <EyeOff className="w-3 h-3" /> Hide
-                  </button>
-                ) : (
-                  <button onClick={() => handleDecryptNote(note)} className="text-cyan-400 hover:text-cyan-200 text-xs flex items-center gap-1 transition border border-cyan-500/30 rounded px-2 py-1">
-                    <Eye className="w-3 h-3" /> View
-                  </button>
-                )}
-                <button onClick={() => setDeleteConfirm(note.id)} className="text-red-400 hover:text-red-200 text-xs flex items-center gap-1 transition border border-red-500/30 rounded px-2 py-1">
-                  <Trash2 className="w-3 h-3" /> Delete
+          <div key={note.id} style={S.noteCard}>
+            <div style={S.noteCardTop}>
+              <span style={S.noteDate}>{new Date(note.created_at).toLocaleString()}</span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {decryptedNotes[note.id]
+                  ? <button style={S.noteBtn} onClick={() => handleHideNote(note.id)}><EyeOff size={12} /> Hide</button>
+                  : <button style={S.noteBtn} onClick={() => handleDecryptNote(note)}><Eye size={12} /> View</button>}
+                <button style={{ ...S.noteBtn, ...S.noteBtnRed }} onClick={() => setDeleteTarget(note.id)}>
+                  <Trash2 size={12} /> Delete
                 </button>
               </div>
             </div>
-            <div className="text-sm break-words p-3 bg-gray-900/60 rounded-lg border border-gray-700/50 max-h-40 overflow-y-auto">
+            <div style={S.noteContent}>
               {decryptedNotes[note.id]
-                ? <span className="text-gray-200">{decryptedNotes[note.id]}</span>
-                : <span className="text-gray-600 italic flex items-center gap-2"><Lock className="w-3 h-3" /> Encrypted — click View to decrypt</span>
-              }
+                ? <span style={{ color: '#e2e8f0' }}>{decryptedNotes[note.id]}</span>
+                : <span style={S.noteEncrypted}><Lock size={12} /> Encrypted — tap View to decrypt</span>}
             </div>
           </div>
         ))}
       </div>
 
-      {/* Delete Modal */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-gray-900 border border-red-500/40 rounded-xl p-6 w-full max-w-sm shadow-2xl">
-            <h4 className="text-lg font-semibold text-white mb-2">Delete Note?</h4>
-            <p className="text-sm text-gray-400 mb-5">This encrypted note will be permanently deleted.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 transition text-sm">Cancel</button>
-              <button onClick={() => handleDeleteNote(deleteConfirm)} disabled={loading}
-                className="flex-1 px-3 py-2 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
-                {loading ? 'Deleting...' : 'Delete Note'}
+      {modal === 'options' && <OptionsModal fromVault />}
+      {modal === 'forgot'  && <ForgotModal />}
+      <ChangePinModals />
+
+      {deleteTarget && (
+        <div style={S.modalBackdrop}>
+          <div style={S.forgotModal}>
+            <div style={S.forgotTitle}>Delete Note?</div>
+            <div style={S.forgotBody}>This encrypted note will be permanently deleted.</div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+              <button style={S.optionCancelBtn} onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button
+                style={{ ...S.optionBtn, background: '#e63950', color: '#fff', flex: 1 }}
+                onClick={() => handleDeleteNote(deleteTarget)} disabled={loading}>
+                {loading ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>
@@ -591,4 +855,63 @@ export const SecureNotesVault = () => {
       )}
     </div>
   );
+};
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const S: Record<string, React.CSSProperties> = {
+  pinWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100%', background: '#0a0a0a', padding: '32px 16px 24px', fontFamily: "'SF Pro Display', -apple-system, sans-serif" },
+  pinHeader: { textAlign: 'center', marginBottom: 32 },
+  pinShieldWrap: { width: 60, height: 60, borderRadius: '50%', background: 'rgba(230,57,80,0.12)', border: '1.5px solid rgba(230,57,80,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' },
+  pinTitle: { fontSize: 22, fontWeight: 600, color: '#fff', marginBottom: 6 },
+  pinSubtitle: { fontSize: 13, color: '#666', marginTop: 4 },
+  dotsRow: { display: 'flex', gap: 18, marginBottom: 24 },
+  dot: { width: 14, height: 14, borderRadius: '50%', border: '2px solid #e63950', background: 'transparent', transition: 'background 0.15s' },
+  dotFilled: { background: '#e63950' },
+  pinError: { display: 'flex', alignItems: 'center', gap: 6, color: '#e63950', fontSize: 12, marginBottom: 14, background: 'rgba(230,57,80,0.08)', padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(230,57,80,0.2)' },
+  keypad: { display: 'flex', flexDirection: 'column', gap: 12, width: '100%', maxWidth: 280 },
+  keyRow: { display: 'flex', gap: 12, justifyContent: 'center' },
+  keyBtn: { width: 80, height: 80, borderRadius: '50%', border: '1.5px solid rgba(230,57,80,0.5)', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  keyNum: { fontSize: 26, fontWeight: 300, color: '#e63950', lineHeight: 1 },
+  keyDel: { width: 80, height: 80, borderRadius: '50%', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  keyEmpty: { width: 80, height: 80 },
+  optionsBtn: { marginTop: 24, background: 'transparent', border: 'none', color: '#888', fontSize: 14, cursor: 'pointer', textDecoration: 'underline' },
+  modalBackdrop: { position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' },
+  optionsModal: { background: '#1a1a1a', borderRadius: '20px 20px 0 0', padding: '28px 20px 40px', width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', gap: 10 },
+  optionsTitle: { textAlign: 'center', color: '#fff', fontSize: 18, fontWeight: 600, marginBottom: 8 },
+  optionBtn: { width: '100%', padding: '16px', borderRadius: 14, background: '#2a2a2a', border: '1px solid #333', color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer' },
+  optionCancelBtn: { width: '100%', padding: '14px', borderRadius: 14, background: 'transparent', border: 'none', color: '#888', fontSize: 15, cursor: 'pointer', marginTop: 4 },
+  pinModalWrap: { background: '#0a0a0a', borderRadius: '20px 20px 0 0', padding: '0 0 20px', width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  cancelLink: { background: 'transparent', border: 'none', color: '#888', fontSize: 14, cursor: 'pointer', textDecoration: 'underline', marginTop: 8 },
+  forgotModal: { background: '#1a1a1a', borderRadius: '20px 20px 0 0', padding: '32px 24px 40px', width: '100%', maxWidth: 480, display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  forgotIcon: { fontSize: 36, marginBottom: 10 },
+  forgotTitle: { color: '#fff', fontSize: 20, fontWeight: 700, marginBottom: 10 },
+  forgotBody: { color: '#aaa', fontSize: 14, lineHeight: 1.6, textAlign: 'center', marginBottom: 16 },
+  forgotInput: { width: '100%', background: '#111', border: '1px solid #333', borderRadius: 12, padding: '14px 16px', color: '#fff', fontSize: 16, outline: 'none', boxSizing: 'border-box' },
+  showPwBtn: { background: 'transparent', border: 'none', color: '#888', fontSize: 12, cursor: 'pointer', marginTop: 6, alignSelf: 'flex-end' },
+  forgotError: { display: 'flex', alignItems: 'center', gap: 6, color: '#e63950', fontSize: 12, marginTop: 8 },
+  vaultWrap: { background: '#0d1117', minHeight: '100%', padding: '0 0 40px', fontFamily: "'SF Pro Display', -apple-system, sans-serif", color: '#fff' },
+  vaultHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid #1e2d3d', background: '#0d1117', position: 'sticky', top: 0, zIndex: 10 },
+  vaultHeaderLeft: { display: 'flex', alignItems: 'center', gap: 10 },
+  vaultTitle: { fontSize: 17, fontWeight: 700, color: '#fff' },
+  vaultUnlockTime: { fontSize: 11, color: '#4ade80', marginTop: 2 },
+  lockBtn: { display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 20, background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)', color: '#facc15', fontSize: 13, cursor: 'pointer', fontWeight: 600 },
+  settingsBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, borderRadius: '50%', background: 'rgba(255,255,255,0.06)', border: '1px solid #2a2a2a', color: '#888', cursor: 'pointer' },
+  addNoteBox: { margin: '16px', background: '#161b22', border: '1px solid #1e2d3d', borderRadius: 16, padding: 16 },
+  addNoteLabel: { display: 'flex', alignItems: 'center', gap: 6, color: '#22d3ee', fontSize: 13, fontWeight: 600, marginBottom: 10 },
+  textarea: { width: '100%', height: 90, background: '#0d1117', border: '1px solid #1e2d3d', borderRadius: 10, padding: 12, color: '#fff', fontSize: 14, resize: 'none', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' },
+  saveBtn: { width: '100%', marginTop: 10, padding: '12px', borderRadius: 12, border: 'none', background: 'linear-gradient(135deg, #22d3ee, #4ade80)', color: '#0a0a0a', fontWeight: 700, fontSize: 14, cursor: 'pointer' },
+  errorMsg: { display: 'flex', alignItems: 'center', gap: 6, margin: '0 16px 12px', padding: '10px 12px', background: 'rgba(230,57,80,0.1)', border: '1px solid rgba(230,57,80,0.3)', borderRadius: 10, color: '#f87171', fontSize: 13 },
+  successMsg: { margin: '0 16px 12px', padding: '10px 12px', background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)', borderRadius: 10, color: '#4ade80', fontSize: 13 },
+  notesLabel: { padding: '0 16px 8px', fontSize: 11, color: '#666', textTransform: 'uppercase', letterSpacing: '0.08em' },
+  loadingSmall: { padding: '0 16px', color: '#555', fontSize: 13, fontStyle: 'italic' },
+  notesList: { display: 'flex', flexDirection: 'column', gap: 10, padding: '0 16px' },
+  noteCard: { background: '#161b22', border: '1px solid #1e2d3d', borderRadius: 14, padding: '14px' },
+  noteCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  noteDate: { color: '#555', fontSize: 11 },
+  noteBtn: { display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, background: 'rgba(34,211,238,0.08)', border: '1px solid rgba(34,211,238,0.25)', color: '#22d3ee', fontSize: 11, cursor: 'pointer' },
+  noteBtnRed: { background: 'rgba(230,57,80,0.08)', border: '1px solid rgba(230,57,80,0.25)', color: '#e63950' },
+  noteContent: { background: '#0d1117', borderRadius: 8, padding: '10px 12px', fontSize: 14, lineHeight: 1.5, maxHeight: 120, overflowY: 'auto', border: '1px solid #1e2d3d' },
+  noteEncrypted: { display: 'flex', alignItems: 'center', gap: 6, color: '#555', fontStyle: 'italic', fontSize: 13 },
+  loadingWrap: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, minHeight: 200, color: '#888' },
+  loadingText: { color: '#666', fontSize: 14 },
 };
