@@ -706,7 +706,6 @@ export const SecureNotesVault = () => {
   );
 };
 
-
 export default SecureNotesVault;
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
