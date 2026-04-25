@@ -243,12 +243,25 @@ export const Dashboard = () => {
   const { showToast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const location = useLocation();
   const navigate = useNavigate();
 
   const activeTool =
     allTools.find((t) => t.path === location.pathname)?.id ??
     (location.pathname.startsWith('/tools') ? 'password-generator' : 'dashboard');
+
+  // Filter tools based on search query
+  const filteredToolGroups = searchQuery.trim() 
+    ? [
+        {
+          label: 'SEARCH RESULTS',
+          items: allTools.filter((tool) =>
+            tool.name.toLowerCase().includes(searchQuery.toLowerCase())
+          ),
+        },
+      ]
+    : toolGroups;
 
   const handleSignOut = async () => {
     setShowSignOutModal(false);
@@ -357,42 +370,64 @@ export const Dashboard = () => {
             </button>
           </div>
 
+          {/* Search Bar */}
+          <div className="px-2 py-3 border-b border-gray-800/80 shrink-0">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search tools..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-gray-900/60 border border-gray-700 rounded-lg pl-9 pr-3 py-2.5 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:bg-gray-900 transition-all"
+              />
+            </div>
+          </div>
+
           {/* Nav — scrollable */}
           <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-gray-800">
-            {toolGroups.map((group) => (
-              <div key={group.label}>
-                <p className="px-3 mb-1.5 text-[10px] font-bold text-gray-600 tracking-[0.2em]">
-                  {group.label}
-                </p>
-                <div className="space-y-0.5">
-                  {group.items.map((tool) => {
-                    const Icon = tool.icon;
-                    const isActive = activeTool === tool.id;
-                    return (
-                      <button
-                        key={tool.id}
-                        onClick={() => { navigate(tool.path); setSidebarOpen(false); }}
-                        className={`
-                          w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all duration-150 group
-                          ${isActive
-                            ? 'bg-cyan-500/10 border border-cyan-500/30 text-white'
-                            : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800/50 border border-transparent'
-                          }
-                        `}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-cyan-400' : 'text-gray-600 group-hover:text-gray-400'}`} />
-                          <span className="text-xs truncate">{tool.name}</span>
-                        </div>
-                        {isActive && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 animate-pulse" />
-                        )}
-                      </button>
-                    );
-                  })}
+            {filteredToolGroups.length > 0 ? (
+              filteredToolGroups.map((group) => (
+                <div key={group.label}>
+                  <p className="px-3 mb-1.5 text-[10px] font-bold text-gray-600 tracking-[0.2em]">
+                    {group.label}
+                  </p>
+                  <div className="space-y-0.5">
+                    {group.items.map((tool) => {
+                      const Icon = tool.icon;
+                      const isActive = activeTool === tool.id;
+                      return (
+                        <button
+                          key={tool.id}
+                          onClick={() => { navigate(tool.path); setSidebarOpen(false); }}
+                          className={`
+                            w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all duration-150 group
+                            ${isActive
+                              ? 'bg-cyan-500/10 border border-cyan-500/30 text-white'
+                              : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800/50 border border-transparent'
+                            }
+                          `}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-cyan-400' : 'text-gray-600 group-hover:text-gray-400'}`} />
+                            <span className="text-xs truncate">{tool.name}</span>
+                          </div>
+                          {isActive && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 animate-pulse" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+              ))
+            ) : (
+              <div className="px-3 py-8 text-center">
+                <Search className="w-8 h-8 text-gray-700 mx-auto mb-2 opacity-50" />
+                <p className="text-xs text-gray-600">No tools found</p>
+                <p className="text-[10px] text-gray-700 mt-1">Try different keywords</p>
               </div>
-            ))}
+            )}
           </nav>
 
           {/* Bottom: Profile + Settings + Sign Out */}
