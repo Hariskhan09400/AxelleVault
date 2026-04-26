@@ -229,78 +229,92 @@ export const IPIntelligence = () => {
     setDnsRecords({});
 
     try {
-      // Primary: ip-api.com — free, no key needed
-      const res = await fetch(
-        `https://ip-api.com/json/${encodeURIComponent(target)}?fields=status,message,continent,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query`
-      );
+      // Primary: ipwho.is — free, HTTPS, no API key needed
+      const res = await fetch(`https://ipwho.is/${encodeURIComponent(target)}`);
       const d = await res.json();
 
-      if (d.status === 'fail') {
-        setError(d.message || 'Invalid IP or domain');
-        setLoading(false);
-        return;
-      }
-
-      const info: IPInfo = {
-        ip: d.query,
-        country: d.country || 'Unknown',
-        country_code: d.countryCode || '',
-        city: d.city || 'Unknown',
-        region: d.regionName || d.region || 'Unknown',
-        timezone: d.timezone || 'Unknown',
-        isp: d.isp || 'Unknown',
-        org: d.org || 'Unknown',
-        asn: d.as || 'Unknown',
-        latitude: typeof d.lat === 'number' ? d.lat : null,
-        longitude: typeof d.lon === 'number' ? d.lon : null,
-        continent: d.continent || 'Unknown',
-        mobile: !!d.mobile,
-        proxy: !!d.proxy,
-        hosting: !!d.hosting,
-      };
-      setIpInfo(info);
-
-      // Derive risk from what ip-api gives us
-      const abuseScore = info.proxy ? 65 : info.hosting ? 30 : 5;
-      const risk: RiskInfo = {
-        score: abuseScore,
-        is_vpn: info.proxy,
-        is_tor: false,
-        is_proxy: info.proxy,
-        is_datacenter: info.hosting,
-        abuse_confidence: abuseScore,
-        threat_level: calcThreat({ score: abuseScore, is_proxy: info.proxy, is_datacenter: info.hosting }),
-      };
-      setRiskInfo(risk);
-
-      // Try AbuseIPDB via allorigins proxy for better risk data
-      try {
-        const abuseRes = await fetch(
-          `https://api.allorigins.win/get?url=${encodeURIComponent(`https://api.abuseipdb.com/api/v2/check?ipAddress=${info.ip}&maxAgeInDays=90`)}`
-        );
-        const abuseJson = await abuseRes.json();
-        if (abuseJson?.contents) {
-          const abuseData = JSON.parse(abuseJson.contents);
-          if (abuseData?.data) {
-            const ad = abuseData.data;
-            const updatedScore = ad.abuseConfidenceScore ?? abuseScore;
-            const updatedRisk: RiskInfo = {
-              score: updatedScore,
-              is_vpn: ad.usageType?.toLowerCase().includes('vpn') ?? info.proxy,
-              is_tor: ad.isTor ?? false,
-              is_proxy: ad.usageType?.toLowerCase().includes('proxy') ?? info.proxy,
-              is_datacenter: ad.usageType?.toLowerCase().includes('data') ?? info.hosting,
-              abuse_confidence: updatedScore,
-              threat_level: calcThreat({ score: updatedScore, is_tor: ad.isTor }),
-            };
-            setRiskInfo(updatedRisk);
-            saveToHistory(info, updatedRisk.threat_level);
+      if (!d.success) {
+        // Fallback: ipapi.co — also free + HTTPS
+        try {
+          const res2 = await fetch(`https://ipapi.co/${encodeURIComponent(target)}/json/`);
+          const d2 = await res2.json();
+          if (d2.error) {
+            setError(d2.reason || 'Invalid IP or domain');
             setLoading(false);
             return;
           }
+          const info: IPInfo = {
+            ip: d2.ip,
+            country: d2.country_name || 'Unknown',
+            country_code: d2.country_code || '',
+            city: d2.city || 'Unknown',
+            region: d2.region || 'Unknown',
+            timezone: d2.timezone || 'Unknown',
+            isp: d2.org || 'Unknown',
+            org: d2.org || 'Unknown',
+            asn: d2.asn || 'Unknown',
+            latitude: typeof d2.latitude === 'number' ? d2.latitude : null,
+            longitude: typeof d2.longitude === 'number' ? d2.longitude : null,
+            continent: d2.continent_code || 'Unknown',
+            mobile: false,
+            proxy: false,
+            hosting: false,
+          };
+          setIpInfo(info);
+          const score = 5;
+          const risk: RiskInfo = {
+            score, is_vpn: false, is_tor: false, is_proxy: false,
+            is_datacenter: false, abuse_confidence: score,
+            threat_level: calcThreat({ score }),
+          };
+          setRiskInfo(risk);
+          saveToHistory(info, risk.threat_level);
+          setLoading(false);
+          return;
+        } catch {
+          setError('Failed to fetch IP information. Check your connection.');
+          setLoading(false);
+          return;
         }
-      } catch {}
+      }
 
+      const info: IPInfo = {
+        ip: d.ip,
+        country: d.country || 'Unknown',
+        country_code: d.country_code || '',
+        city: d.city || 'Unknown',
+        region: d.region || 'Unknown',
+        timezone: d.timezone?.id || 'Unknown',
+        isp: d.connection?.isp || d.connection?.org || 'Unknown',
+        org: d.connection?.org || 'Unknown',
+        asn: d.connection?.asn ? `AS${d.connection.asn}` : 'Unknown',
+        latitude: typeof d.latitude === 'number' ? d.latitude : null,
+        longitude: typeof d.longitude === 'number' ? d.longitude : null,
+        continent: d.continent || 'Unknown',
+        mobile: d.type === 'mobile',
+        proxy: d.security?.is_proxy || false,
+        hosting: d.type === 'hosting' || d.security?.is_datacenter || false,
+      };
+      setIpInfo(info);
+
+      // Build risk from ipwho.is security field
+      const sec = d.security || {};
+      const isProxy   = !!sec.is_proxy;
+      const isTor     = !!sec.is_tor;
+      const isDC      = !!sec.is_datacenter;
+      const isVPN     = !!sec.is_vpn;
+      const abuseScore = isTor ? 90 : isProxy || isVPN ? 65 : isDC ? 30 : 5;
+
+      const risk: RiskInfo = {
+        score: abuseScore,
+        is_vpn: isVPN,
+        is_tor: isTor,
+        is_proxy: isProxy,
+        is_datacenter: isDC,
+        abuse_confidence: abuseScore,
+        threat_level: calcThreat({ score: abuseScore, is_tor: isTor }),
+      };
+      setRiskInfo(risk);
       saveToHistory(info, risk.threat_level);
     } catch {
       setError('Failed to fetch IP information. Check your connection.');
@@ -405,24 +419,28 @@ export const IPIntelligence = () => {
     const results: { ip: string; info: IPInfo | null; error?: string }[] = [];
     for (const target of ips) {
       try {
-        const r = await fetch(
-          `https://ip-api.com/json/${encodeURIComponent(target)}?fields=status,message,country,countryCode,regionName,city,isp,org,as,lat,lon,proxy,hosting,mobile,query`
-        );
+        const r = await fetch(`https://ipwho.is/${encodeURIComponent(target)}`);
         const d = await r.json();
-        if (d.status === 'fail') {
-          results.push({ ip: target, info: null, error: d.message });
+        if (!d.success) {
+          results.push({ ip: target, info: null, error: d.message || 'Invalid IP' });
         } else {
           results.push({
             ip: target,
             info: {
-              ip: d.query, country: d.country, country_code: d.countryCode,
-              city: d.city, region: d.regionName, timezone: '', isp: d.isp,
-              org: d.org, asn: d.as, latitude: d.lat, longitude: d.lon,
-              continent: '', mobile: d.mobile, proxy: d.proxy, hosting: d.hosting,
+              ip: d.ip, country: d.country, country_code: d.country_code,
+              city: d.city, region: d.region, timezone: d.timezone?.id || '',
+              isp: d.connection?.isp || d.connection?.org || 'Unknown',
+              org: d.connection?.org || 'Unknown',
+              asn: d.connection?.asn ? `AS${d.connection.asn}` : 'Unknown',
+              latitude: typeof d.latitude === 'number' ? d.latitude : null,
+              longitude: typeof d.longitude === 'number' ? d.longitude : null,
+              continent: d.continent || '', mobile: d.type === 'mobile',
+              proxy: d.security?.is_proxy || false,
+              hosting: d.type === 'hosting' || d.security?.is_datacenter || false,
             },
           });
         }
-        await new Promise(r => setTimeout(r, 150)); // rate limit
+        await new Promise(res => setTimeout(res, 200));
       } catch {
         results.push({ ip: target, info: null, error: 'Request failed' });
       }
@@ -455,9 +473,10 @@ export const IPIntelligence = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="bg-gray-900/50 backdrop-blur-xl border border-cyan-500/30 rounded-lg p-6 shadow-lg max-w-4xl">
+    <div className="bg-gray-900/50 backdrop-blur-xl border border-cyan-500/30 rounded-xl p-6 xl:p-8 shadow-2xl w-full min-h-[500px] flex flex-col">
 
       {/* ── Header ── */}
+
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Globe className="w-6 h-6 text-cyan-400" />
@@ -509,12 +528,12 @@ export const IPIntelligence = () => {
       )}
 
       {/* ── Tabs ── */}
-      <div className="flex gap-1 mb-4 overflow-x-auto pb-1 scrollbar-hide">
+      <div className="flex flex-wrap gap-1 mb-5">
         {TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-all ${
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-md text-xs font-medium whitespace-nowrap transition-all ${
               activeTab === tab.id
                 ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
                 : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
@@ -543,7 +562,7 @@ export const IPIntelligence = () => {
             </div>
           )}
           {ipInfo && !loading && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
 
               {/* Basic Info */}
               <div className="bg-gray-800/40 border border-gray-700/60 rounded-lg p-4">
@@ -569,13 +588,13 @@ export const IPIntelligence = () => {
 
               {/* Map */}
               {ipInfo.latitude !== null && ipInfo.longitude !== null && (
-                <div className="md:col-span-2 bg-gray-800/40 border border-gray-700/60 rounded-lg p-4">
+                <div className="lg:col-span-2 xl:col-span-3 bg-gray-800/40 border border-gray-700/60 rounded-lg p-4">
                   <p className="text-xs text-cyan-400 font-mono uppercase tracking-widest mb-3 flex items-center gap-2">
                     <MapPin className="w-3.5 h-3.5" /> Map Preview
                   </p>
                   <iframe
                     title="IP location map"
-                    className="w-full h-52 rounded-lg border border-gray-700"
+                    className="w-full h-64 rounded-lg border border-gray-700"
                     loading="lazy"
                     src={`https://www.openstreetmap.org/export/embed.html?bbox=${ipInfo.longitude - 0.3}%2C${ipInfo.latitude - 0.3}%2C${ipInfo.longitude + 0.3}%2C${ipInfo.latitude + 0.3}&layer=mapnik&marker=${ipInfo.latitude}%2C${ipInfo.longitude}`}
                   />
@@ -599,7 +618,7 @@ export const IPIntelligence = () => {
               [ Run an IP lookup first ]
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
               {/* Score gauge */}
               <div className="bg-gray-800/40 border border-gray-700/60 rounded-lg p-5 flex flex-col items-center">
@@ -636,7 +655,7 @@ export const IPIntelligence = () => {
               </div>
 
               {/* Risk bars */}
-              <div className="md:col-span-2 bg-gray-800/40 border border-gray-700/60 rounded-lg p-4">
+              <div className="lg:col-span-2 xl:col-span-3 bg-gray-800/40 border border-gray-700/60 rounded-lg p-4">
                 <p className="text-xs text-cyan-400 font-mono uppercase tracking-widest mb-4">Score Breakdown</p>
                 <RiskBar label="Abuse Confidence"  value={riskInfo.abuse_confidence} />
                 <RiskBar label="Overall Threat"    value={riskInfo.score} />
@@ -775,25 +794,25 @@ export const IPIntelligence = () => {
           </div>
 
           {bulkResults.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs font-mono">
+            <div className="overflow-x-auto rounded-lg border border-gray-700/40">
+              <table className="w-full text-xs font-mono min-w-[600px]">
                 <thead>
-                  <tr className="border-b border-gray-700">
+                  <tr className="border-b border-gray-700 bg-gray-900/60">
                     {['IP', 'Country', 'City', 'ISP', 'Proxy', 'DC', 'Status'].map(h => (
-                      <th key={h} className="text-left py-2 px-2 text-gray-500 uppercase tracking-wider">{h}</th>
+                      <th key={h} className="text-left py-2.5 px-4 text-gray-500 uppercase tracking-widest font-semibold">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {bulkResults.map((r, i) => (
-                    <tr key={i} className="border-b border-gray-800/60 hover:bg-gray-800/30 transition-colors">
-                      <td className="py-2 px-2 text-cyan-400">{r.ip}</td>
-                      <td className="py-2 px-2 text-gray-300">{r.info?.country ?? '—'}</td>
-                      <td className="py-2 px-2 text-gray-300">{r.info?.city ?? '—'}</td>
-                      <td className="py-2 px-2 text-gray-400 max-w-[140px] truncate">{r.info?.isp ?? '—'}</td>
-                      <td className="py-2 px-2">{r.info ? (r.info.proxy ? <span className="text-red-400">Yes</span> : <span className="text-emerald-400">No</span>) : '—'}</td>
-                      <td className="py-2 px-2">{r.info ? (r.info.hosting ? <span className="text-yellow-400">Yes</span> : <span className="text-emerald-400">No</span>) : '—'}</td>
-                      <td className="py-2 px-2">
+                    <tr key={i} className="border-b border-gray-800/40 hover:bg-gray-800/30 transition-colors">
+                      <td className="py-2.5 px-4 text-cyan-400 font-mono">{r.ip}</td>
+                      <td className="py-2.5 px-4 text-gray-300">{r.info?.country ?? '—'}</td>
+                      <td className="py-2.5 px-4 text-gray-300">{r.info?.city ?? '—'}</td>
+                      <td className="py-2.5 px-4 text-gray-400 max-w-[200px] truncate">{r.info?.isp ?? '—'}</td>
+                      <td className="py-2.5 px-4">{r.info ? (r.info.proxy ? <span className="text-red-400">Yes</span> : <span className="text-emerald-400">No</span>) : '—'}</td>
+                      <td className="py-2.5 px-4">{r.info ? (r.info.hosting ? <span className="text-yellow-400">Yes</span> : <span className="text-emerald-400">No</span>) : '—'}</td>
+                      <td className="py-2.5 px-4">
                         {r.error
                           ? <span className="text-red-400">Error</span>
                           : <span className="text-emerald-400">OK</span>}
@@ -834,7 +853,7 @@ export const IPIntelligence = () => {
                 <div
                   key={i}
                   onClick={() => { setIp(h.ip); handleLookup(h.ip); setActiveTab('overview'); }}
-                  className="flex items-center justify-between bg-gray-800/40 border border-gray-700/40 rounded-lg px-4 py-3 hover:border-cyan-500/30 hover:bg-gray-800/60 cursor-pointer transition-all group"
+                  className="flex items-center justify-between bg-gray-800/40 border border-gray-700/40 rounded-lg px-5 py-3.5 hover:border-cyan-500/30 hover:bg-gray-800/60 cursor-pointer transition-all group"
                 >
                   <div className="flex items-center gap-3">
                     <Wifi className="w-4 h-4 text-gray-600 group-hover:text-cyan-400 transition-colors" />

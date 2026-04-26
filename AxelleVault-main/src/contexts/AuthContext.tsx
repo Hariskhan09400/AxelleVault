@@ -1,26 +1,25 @@
-import { createContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useEffect, useState, ReactNode, useRef } from 'react';
 import { AuthError, User } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabase } from '../lib/supabase';
 
-// ✅ New single table type
 export interface UserLoginDetail {
   id: string;
-  username: string;
+  username: string | null;
   email: string;
   password_hash: string | null;
-  role: 'free' | 'admin';
+  role: string;
   security_score: number;
   total_logins: number;
   failed_attempts: number;
-  login_history: { time: string; success: boolean; ip?: string }[];
-  created_at: string;
+  login_history: Array<{ time: string; success: boolean }>;
   last_login: string | null;
-  updated_at: string;
+  created_at: string;
+  updated_at: string | null;
 }
 
 export interface AuthContextType {
   user: User | null;
-  profile: UserLoginDetail | null;        // ✅ ab profile = user_login_detail row
+  profile: UserLoginDetail | null;
   loading: boolean;
   authError: string | null;
   signUp: (email: string, password: string, username: string) => Promise<{ error: AuthError | null }>;
@@ -38,14 +37,17 @@ export interface AuthContextType {
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser]       = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserLoginDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser]         = useState<User | null>(null);
+  const [profile, setProfile]   = useState<UserLoginDetail | null>(null);
+  const [loading, setLoading]   = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [userRole, setUserRole]   = useState<string | null>(null);
-  const [isAdmin, setIsAdmin]     = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin]   = useState(false);
 
-  // ─── Fetch from single table ──────────────────────────────
+  // ✅ KEY FIX: signup flow mein auto-login block karne ke liye flag
+  const isSigningUp = useRef(false);
+
+  // ─── fetchProfile ─────────────────────────────────────────
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -55,12 +57,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .maybeSingle();
 
       if (error) { console.error('[Auth] fetchProfile error:', error.message); return; }
-
       setProfile(data ?? null);
       const role = data?.role ?? 'free';
       setUserRole(role);
       setIsAdmin(role === 'admin');
-      console.log('[Auth] Profile loaded:', data);
     } catch (err) {
       console.error('[Auth] fetchProfile exception:', err);
     }
@@ -70,111 +70,106 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (user) await fetchProfile(user.id);
   };
 
-  // ─── updateProfile ────────────────────────────────────────
-  const updateProfile = async (fullName: string) => {
-    if (!user) return { error: { message: 'Not authenticated' } as AuthError };
-
-    const { error } = await supabase
-      .from('user_login_detail')
-      .update({ username: fullName, updated_at: new Date().toISOString() })
-      .eq('id', user.id);
-
-    if (error) { console.error('[Auth] updateProfile error:', error.message); return { error }; }
-    await refreshProfile();
-    return { error: null };
-  };
-
-  // ─── changePassword ───────────────────────────────────────
-  const changePassword = async (oldPassword: string, newPassword: string) => {
-    if (!user) return { error: { message: 'Not authenticated' } as AuthError };
-
-    const { error: verifyError } = await supabase.auth.signInWithPassword({
-      email: user.email ?? '',
-      password: oldPassword,
-    });
-    if (verifyError) return { error: verifyError };
-
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) { console.error('[Auth] changePassword error:', error.message); return { error }; }
-    return { error: null };
-  };
-
-  // ─── deleteAccount ────────────────────────────────────────
-  const deleteAccount = async () => {
-    if (!user) return { error: { message: 'Not authenticated' } as AuthError };
-
-    // user_login_detail CASCADE se delete hoga auth.users ke saath
-    const { error } = await supabase
-      .from('user_login_detail')
-      .delete()
-      .eq('id', user.id);
-
-    if (error) { console.error('[Auth] deleteAccount error:', error.message); return { error }; }
-
-    // encrypted_notes aur vault_pins bhi clean karo
-    await supabase.from('encrypted_notes').delete().eq('user_id', user.id);
-    await supabase.from('vault_pins').delete().eq('user_id', user.id);
-
-    const { error: signOutError } = await supabase.auth.signOut();
-    if (signOutError) return { error: signOutError };
-
+  // ─── clearAllState ────────────────────────────────────────
+  const clearAllState = () => {
     setUser(null);
     setProfile(null);
     setUserRole(null);
     setIsAdmin(false);
-    return { error: null };
+    setAuthError(null);
+  };
+
+  // ─── clearAllStorage ──────────────────────────────────────
+  const clearAllStorage = () => {
+    Object.keys(localStorage).forEach(key => {
+      if (
+        key.includes('supabase') ||
+        key.includes('sb-') ||
+        key.includes('axellevault') ||
+        key.startsWith('av_')
+      ) {
+        localStorage.removeItem(key);
+      }
+    });
+    sessionStorage.clear();
   };
 
   // ─── Session init ─────────────────────────────────────────
   useEffect(() => {
     if (!hasSupabaseEnv) {
-      setAuthError('Supabase environment is not configured.');
+      setAuthError('Supabase not configured.');
       setLoading(false);
       return;
     }
 
     let isMounted = true;
 
-    const handleSession = async () => {
+    // App open hone pe existing session check karo
+    const initSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) console.warn('[Auth] getSession warning:', error.message);
-
+        const { data } = await supabase.auth.getSession();
         const sessionUser = data?.session?.user ?? null;
         if (!isMounted) return;
 
-        setUser(sessionUser);
-        if (sessionUser) await fetchProfile(sessionUser.id);
-        else { setProfile(null); setUserRole(null); setIsAdmin(false); }
-        setAuthError(null);
+        // ✅ Sirf tab set karo jab SIGN IN hua ho, signup nahi
+        if (sessionUser && !isSigningUp.current) {
+          setUser(sessionUser);
+          await fetchProfile(sessionUser.id);
+        } else {
+          clearAllState();
+        }
       } catch (err) {
-        console.error('[Auth] getSession exception:', err);
-        if (isMounted) { setUser(null); setProfile(null); setUserRole(null); setIsAdmin(false); }
+        console.error('[Auth] initSession error:', err);
+        if (isMounted) clearAllState();
       } finally {
         if (isMounted) setLoading(false);
       }
     };
 
-    handleSession();
+    initSession();
 
+    // Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        console.log('[Auth] Event:', _event, session?.user?.email ?? 'none');
+      async (event, session) => {
+        console.log('[Auth] Event:', event, '| User:', session?.user?.email ?? 'none');
         if (!isMounted) return;
-        const sessionUser = session?.user ?? null;
-        setUser(sessionUser);
-        if (sessionUser) await fetchProfile(sessionUser.id);
-        else { setProfile(null); setUserRole(null); setIsAdmin(false); }
-        setAuthError(null);
+
+        if (event === 'SIGNED_OUT') {
+          clearAllState();
+          setLoading(false);
+          return;
+        }
+
+        // ✅ SIGNUP event pe auto-login block karo
+        if (event === 'SIGNED_IN' && isSigningUp.current) {
+          console.log('[Auth] Signup flow — blocking auto-login, signing out silently');
+          isSigningUp.current = false;
+          // Silent signout — state change nahi hogi
+          await supabase.auth.signOut({ scope: 'global' });
+          clearAllStorage();
+          clearAllState();
+          setLoading(false);
+          return;
+        }
+
+        if (event === 'SIGNED_IN' && session?.user) {
+          setUser(session.user);
+          await fetchProfile(session.user.id);
+        }
+
         setLoading(false);
       }
     );
 
     const timeout = setTimeout(() => {
-      if (isMounted) { console.warn('[Auth] Timeout'); setLoading(false); }
-    }, 7000);
+      if (isMounted) setLoading(false);
+    }, 6000);
 
-    return () => { isMounted = false; clearTimeout(timeout); subscription.unsubscribe(); };
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // ─── signUp ───────────────────────────────────────────────
@@ -184,33 +179,52 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const normalizedEmail = email.trim().toLowerCase();
     const now = new Date().toISOString();
 
+    // ✅ Flag set karo — auto-login block hoga
+    isSigningUp.current = true;
+
     const { data, error } = await supabase.auth.signUp({
       email: normalizedEmail,
       password,
       options: { data: { username } },
-      // ✅ emailRedirectTo nahi diya — dashboard pe "Confirm email" OFF karo
     });
 
-    if (error) { console.error('[Auth] signUp error:', error.message); return { error }; }
-    if (!data.user) return { error: { message: 'Signup failed — no user returned.' } as AuthError };
+    if (error) {
+      isSigningUp.current = false;
+      console.error('[Auth] signUp error:', error.message);
+      return { error };
+    }
 
-    // ✅ Sab kuch ek hi table mein insert
-    const { error: insertError } = await supabase.from('user_login_detail').upsert({
-      id:             data.user.id,
-      username,
-      email:          normalizedEmail,
-      password_hash:  null,           // Supabase auth internally handle karta hai
-      role:           'free',
-      security_score: 50,
-      total_logins:   0,
-      failed_attempts: 0,
-      login_history:  [],
-      created_at:     now,
-      last_login:     now,
-    });
+    if (!data.user) {
+      isSigningUp.current = false;
+      return { error: { message: 'Signup failed — no user returned.' } as AuthError };
+    }
 
-    if (insertError) console.error('[Auth] user_login_detail insert error:', insertError.message);
-    else console.log('[Auth] user_login_detail created for:', data.user.id);
+    // user_login_detail mein insert — trigger bhi handle karta hai
+    const { error: insertError } = await supabase
+      .from('user_login_detail')
+      .insert({
+        id:             data.user.id,
+        username,
+        email:          normalizedEmail,
+        password_hash:  null,
+        role:           'free',
+        security_score: 50,
+        total_logins:   0,
+        failed_attempts: 0,
+        login_history:  [],
+        created_at:     now,
+        last_login:     now,
+      });
+
+    if (insertError) {
+      console.warn('[Auth] insert warning (trigger may handle):', insertError.message);
+    }
+
+    // ✅ Signup ke baad silently sign out — user ko manually login karna padega
+    await supabase.auth.signOut({ scope: 'global' });
+    clearAllStorage();
+    clearAllState();
+    isSigningUp.current = false;
 
     return { error: null };
   };
@@ -230,7 +244,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (error || !data.user) {
       console.warn('[Auth] signIn failed:', error?.message);
 
-      // ✅ Failed attempt — login_history mein push karo
+      // Failed attempt log
       const { data: existing } = await supabase
         .from('user_login_detail')
         .select('login_history, failed_attempts')
@@ -245,12 +259,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }).eq('email', normalizedEmail);
       }
 
-      return { error };
+      return { error: error ?? { message: 'Login failed' } as AuthError };
     }
 
     const userId = data.user.id;
 
-    // ✅ Successful login — sab ek hi update mein
+    // Successful login update
     const { data: current } = await supabase
       .from('user_login_detail')
       .select('total_logins, login_history')
@@ -266,12 +280,75 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       login_history:   history,
     }).eq('id', userId);
 
+    // ✅ State set karo
+    setUser(data.user);
     await fetchProfile(userId);
+
+    return { error: null };
+  };
+
+  // ─── signOut ──────────────────────────────────────────────
+  const signOut = async () => {
+    try {
+      setLoading(true);
+
+      // ✅ Pehle Supabase session kill karo
+      if (hasSupabaseEnv) {
+        await supabase.auth.signOut({ scope: 'global' });
+      }
+
+      // Phir state aur storage clear karo
+      clearAllState();
+      clearAllStorage();
+
+    } catch (err) {
+      console.error('[Auth] signOut exception:', err);
+      clearAllState();
+      clearAllStorage();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── updateProfile ────────────────────────────────────────
+  const updateProfile = async (fullName: string) => {
+    if (!user) return { error: { message: 'Not authenticated' } as AuthError };
+    const { error } = await supabase
+      .from('user_login_detail')
+      .update({ username: fullName, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+    if (error) return { error };
+    await refreshProfile();
+    return { error: null };
+  };
+
+  // ─── changePassword ───────────────────────────────────────
+  const changePassword = async (oldPassword: string, newPassword: string) => {
+    if (!user) return { error: { message: 'Not authenticated' } as AuthError };
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: user.email ?? '',
+      password: oldPassword,
+    });
+    if (verifyError) return { error: verifyError };
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return { error: error ?? null };
+  };
+
+  // ─── deleteAccount ────────────────────────────────────────
+  const deleteAccount = async () => {
+    if (!user) return { error: { message: 'Not authenticated' } as AuthError };
+    const { error } = await supabase
+      .from('user_login_detail')
+      .delete()
+      .eq('id', user.id);
+    if (error) return { error };
+    await supabase.auth.signOut();
+    clearAllState();
+    clearAllStorage();
     return { error: null };
   };
 
   // ─── requestPasswordReset ─────────────────────────────────
-  // ✅ Sirf yahan email jayegi — reset ke liye intentional
   const requestPasswordReset = async (email: string) => {
     if (!hasSupabaseEnv) return { error: { message: 'Supabase not configured.' } as AuthError };
     const { error } = await supabase.auth.resetPasswordForEmail(
@@ -279,26 +356,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       { redirectTo: `${window.location.origin}/reset-password` }
     );
     return { error };
-  };
-
-  // ─── signOut ──────────────────────────────────────────────
-  const signOut = async () => {
-    if (!hasSupabaseEnv) {
-      setUser(null); setProfile(null); setUserRole(null);
-      setIsAdmin(false); setAuthError(null); setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      const { error } = await supabase.auth.signOut();
-      if (error) { console.error('[Auth] signOut error:', error.message); setAuthError(error.message); }
-      setUser(null); setProfile(null); setUserRole(null); setIsAdmin(false); setAuthError(null);
-    } catch (err) {
-      console.error('[Auth] signOut exception:', err);
-      setAuthError('Sign out failed. Please try again.');
-    } finally {
-      setLoading(false);
-    }
   };
 
   return (

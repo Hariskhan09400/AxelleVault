@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Activity, AlertTriangle, Shield, Clock, ScanLine } from 'lucide-react';
-import { supabase, SecurityLog, ToolUsageHistory } from '../lib/supabase';
+import { supabase, SecurityLog } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { calculateSecurityScore } from '../utils/securityTools';
 
@@ -10,7 +10,6 @@ export const SecurityDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [securityScore, setSecurityScore] = useState(50);
   const [totalScans, setTotalScans] = useState(0);
-  const [toolUsageHistory, setToolUsageHistory] = useState<ToolUsageHistory[]>([]);
 
   useEffect(() => {
     if (user) {
@@ -56,25 +55,18 @@ export const SecurityDashboard = () => {
 
     const score = calculateSecurityScore({
       passwordStrength: 75,
-      recentFailedLogins: profile.failed_login_count || 0,
+      recentFailedLogins: profile.failed_attempts || 0,
       accountAge,
       toolUsage,
     });
 
     setSecurityScore(score);
 
-    await supabase.from('user_profiles').update({ security_score: score }).eq('id', user.id);
-
-    await supabase.from('security_scores_history').insert({
-      user_id: user.id,
-      score,
-      factors: {
-        passwordStrength: 75,
-        failedLogins: profile.failed_login_count || 0,
-        accountAge,
-        toolUsage,
-      },
-    });
+    try {
+      await supabase.from('user_login_detail').update({ security_score: score }).eq('id', user.id);
+    } catch (err) {
+      console.warn('[Dashboard] Failed to update security score:', err);
+    }
 
     refreshProfile();
   };
@@ -158,7 +150,7 @@ export const SecurityDashboard = () => {
             <AlertTriangle className="w-8 h-8 text-orange-400 mr-3" />
             <div>
               <p className="text-sm text-gray-400">Failed Logins</p>
-              <p className="text-3xl font-bold text-white">{profile?.failed_login_count || 0}</p>
+              <p className="text-3xl font-bold text-white">{profile?.failed_attempts || 0}</p>
             </div>
           </div>
           <p className="text-xs text-gray-500">Suspicious activity detected</p>

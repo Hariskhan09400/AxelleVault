@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Shield,
   Key,
@@ -139,7 +139,6 @@ const toolGroups = [
   },
 ];
 
-// Flat list for activeTool lookup
 const allTools = toolGroups.flatMap((g) => g.items);
 
 // ─── Sign Out Modal ───────────────────────────────────────────────────────────
@@ -239,7 +238,8 @@ const UserMenu = ({
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export const Dashboard = () => {
-  const { user, profile, signOut } = useAuth();
+  // ✅ FIX 1: 'loading' ko useAuth se destructure karo
+  const { user, profile, signOut, loading } = useAuth();
   const { showToast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
@@ -251,8 +251,7 @@ export const Dashboard = () => {
     allTools.find((t) => t.path === location.pathname)?.id ??
     (location.pathname.startsWith('/tools') ? 'password-generator' : 'dashboard');
 
-  // Filter tools based on search query
-  const filteredToolGroups = searchQuery.trim() 
+  const filteredToolGroups = searchQuery.trim()
     ? [
         {
           label: 'SEARCH RESULTS',
@@ -263,15 +262,54 @@ export const Dashboard = () => {
       ]
     : toolGroups;
 
+  // ✅ FIX 2: loading check ke baad hi redirect karo — black screen gone
+  useEffect(() => {
+    if (!loading && user === null) {
+      console.log('[Dashboard] User is null, redirecting to login');
+      navigate('/login', { replace: true });
+    }
+  }, [user, loading, navigate]);
+
+  // ✅ FIX 3: Loading state mein proper UI dikhao, blank nahi
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#050a0e] flex items-center justify-center font-mono">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative w-16 h-16">
+            <Shield className="w-16 h-16 text-cyan-500/30" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          </div>
+          <div className="text-center">
+            <p className="text-cyan-400 text-sm tracking-widest uppercase">Initializing Vault</p>
+            <p className="text-gray-600 text-xs mt-1">Verifying secure session...</p>
+          </div>
+          <div className="flex gap-1">
+            {[0,1,2].map(i => (
+              <div key={i} className="w-1.5 h-1.5 rounded-full bg-cyan-500/60 animate-pulse"
+                style={{ animationDelay: `${i * 0.2}s` }} />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ FIX 4: User null hai aur redirect ho raha hai toh blank return
+  if (!user) return null;
+
   const handleSignOut = async () => {
     setShowSignOutModal(false);
     try {
+      showToast('success', 'Session terminating...');
       await signOut();
-      showToast('success', 'Session terminated.');
+      await new Promise(resolve => setTimeout(resolve, 300));
       navigate('/login', { replace: true });
     } catch (err) {
       console.error('[Dashboard] signOut failed:', err);
       showToast('error', 'Sign out failed. Retry.');
+      setTimeout(() => navigate('/login', { replace: true }), 1000);
     }
   };
 
@@ -325,19 +363,11 @@ export const Dashboard = () => {
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-green-500/4 rounded-full blur-3xl" />
-        {/* Scanline effect */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,200,0.3) 2px, rgba(0,255,200,0.3) 3px)',
-            backgroundSize: '100% 4px',
-          }}
-        />
       </div>
 
       <div className="relative flex h-screen overflow-hidden">
 
-        {/* ── SIDEBAR ──────────────────────────────────────────────── */}
+        {/* ── SIDEBAR ── */}
         <aside
           className={`
             ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -362,15 +392,12 @@ export const Dashboard = () => {
                 <p className="text-[10px] text-gray-600 tracking-widest">CYBER SECURITY</p>
               </div>
             </div>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="md:hidden p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition"
-            >
+            <button onClick={() => setSidebarOpen(false)} className="md:hidden p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition">
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Search Bar */}
+          {/* Search */}
           <div className="px-2 py-3 border-b border-gray-800/80 shrink-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600 pointer-events-none" />
@@ -384,14 +411,12 @@ export const Dashboard = () => {
             </div>
           </div>
 
-          {/* Nav — scrollable */}
+          {/* Nav */}
           <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-4 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-gray-800">
             {filteredToolGroups.length > 0 ? (
               filteredToolGroups.map((group) => (
                 <div key={group.label}>
-                  <p className="px-3 mb-1.5 text-[10px] font-bold text-gray-600 tracking-[0.2em]">
-                    {group.label}
-                  </p>
+                  <p className="px-3 mb-1.5 text-[10px] font-bold text-gray-600 tracking-[0.2em]">{group.label}</p>
                   <div className="space-y-0.5">
                     {group.items.map((tool) => {
                       const Icon = tool.icon;
@@ -412,9 +437,7 @@ export const Dashboard = () => {
                             <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-cyan-400' : 'text-gray-600 group-hover:text-gray-400'}`} />
                             <span className="text-xs truncate">{tool.name}</span>
                           </div>
-                          {isActive && (
-                            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 animate-pulse" />
-                          )}
+                          {isActive && <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 animate-pulse" />}
                         </button>
                       );
                     })}
@@ -430,35 +453,25 @@ export const Dashboard = () => {
             )}
           </nav>
 
-          {/* Bottom: Profile + Settings + Sign Out */}
+          {/* Bottom */}
           <div className="shrink-0 border-t border-gray-800/80 p-3 space-y-2">
-            {/* Profile & Settings */}
             <div className="flex gap-2">
               <button
                 onClick={() => { navigate('/profile'); setSidebarOpen(false); }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs transition-all border
-                  ${activeTool === 'profile'
-                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
-                    : 'bg-gray-900/60 border-gray-800/60 text-gray-400 hover:text-white hover:border-gray-700'
-                  }`}
+                  ${activeTool === 'profile' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300' : 'bg-gray-900/60 border-gray-800/60 text-gray-400 hover:text-white hover:border-gray-700'}`}
               >
-                <User className="w-3.5 h-3.5" />
-                Profile
+                <User className="w-3.5 h-3.5" /> Profile
               </button>
               <button
                 onClick={() => { navigate('/settings'); setSidebarOpen(false); }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs transition-all border
-                  ${activeTool === 'settings'
-                    ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
-                    : 'bg-gray-900/60 border-gray-800/60 text-gray-400 hover:text-white hover:border-gray-700'
-                  }`}
+                  ${activeTool === 'settings' ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300' : 'bg-gray-900/60 border-gray-800/60 text-gray-400 hover:text-white hover:border-gray-700'}`}
               >
-                <SettingsIcon className="w-3.5 h-3.5" />
-                Settings
+                <SettingsIcon className="w-3.5 h-3.5" /> Settings
               </button>
             </div>
 
-            {/* User info card */}
             <div className="bg-gray-900/60 rounded-xl p-3 border border-gray-800/60">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0">
@@ -475,56 +488,38 @@ export const Dashboard = () => {
                   <span className={`font-bold ${scoreColor}`}>{secScore}/100</span>
                 </div>
                 <div className="w-full h-1 bg-gray-800 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-700 ${scoreBarColor}`}
-                    style={{ width: `${secScore}%` }}
-                  />
+                  <div className={`h-full rounded-full transition-all duration-700 ${scoreBarColor}`} style={{ width: `${secScore}%` }} />
                 </div>
               </div>
             </div>
 
-            {/* Sign Out */}
             <button
               onClick={() => setShowSignOutModal(true)}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-500/8 border border-red-500/25 text-red-500 hover:bg-red-500/15 hover:border-red-500/45 hover:text-red-400 transition-all text-xs tracking-widest"
             >
-              <LogOut className="w-3.5 h-3.5" />
-              SIGN OUT
+              <LogOut className="w-3.5 h-3.5" /> SIGN OUT
             </button>
           </div>
         </aside>
 
-        {/* ── MAIN CONTENT ─────────────────────────────────────────── */}
+        {/* ── MAIN CONTENT ── */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-
-          {/* Header */}
           <header className="bg-gray-950/90 backdrop-blur-xl border-b border-cyan-500/10 px-4 md:px-6 py-3.5 shrink-0">
             <div className="flex items-center justify-between gap-4">
-
-              {/* Left: hamburger + title */}
               <div className="flex items-center gap-3 min-w-0">
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  className="md:hidden p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition shrink-0"
-                >
+                <button onClick={() => setSidebarOpen(true)} className="md:hidden p-2 rounded-lg text-gray-500 hover:text-white hover:bg-gray-800 transition shrink-0">
                   <Menu className="w-5 h-5" />
                 </button>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-cyan-500/60 tracking-widest hidden sm:block">AXELLEVAULT //</span>
-                    <h2 className="text-sm md:text-base font-bold text-white tracking-wider truncate uppercase">
-                      {activeToolName}
-                    </h2>
+                    <h2 className="text-sm md:text-base font-bold text-white tracking-wider truncate uppercase">{activeToolName}</h2>
                   </div>
-                  <p className="text-[11px] text-gray-600 truncate">
-                    operator: <span className="text-cyan-500/80">{username}</span>
-                  </p>
+                  <p className="text-[11px] text-gray-600 truncate">operator: <span className="text-cyan-500/80">{username}</span></p>
                 </div>
               </div>
 
-              {/* Right: stats + user menu */}
               <div className="flex items-center gap-2 shrink-0">
-                {/* Stats — desktop only */}
                 <div className="hidden lg:flex items-center gap-2">
                   <div className="bg-gray-900/80 border border-gray-800/60 rounded-lg px-3 py-1.5 text-center">
                     <p className="text-[9px] text-gray-600 tracking-widest">LOGINS</p>
@@ -535,8 +530,6 @@ export const Dashboard = () => {
                     <p className={`text-sm font-bold ${scoreColor}`}>{secScore}/100</p>
                   </div>
                 </div>
-
-                {/* User menu — desktop */}
                 <div className="hidden md:block">
                   <UserMenu
                     username={username}
@@ -545,19 +538,13 @@ export const Dashboard = () => {
                     onSignOut={() => setShowSignOutModal(true)}
                   />
                 </div>
-
-                {/* Mobile signout */}
-                <button
-                  onClick={() => setShowSignOutModal(true)}
-                  className="md:hidden p-2 rounded-lg text-red-500/70 hover:bg-red-500/10 hover:text-red-400 transition"
-                >
+                <button onClick={() => setShowSignOutModal(true)} className="md:hidden p-2 rounded-lg text-red-500/70 hover:bg-red-500/10 hover:text-red-400 transition">
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
             </div>
           </header>
 
-          {/* Page content */}
           <main className="flex-1 overflow-y-auto bg-[#050a0e] p-4 md:p-6">
             <div className="max-w-7xl mx-auto">
               {renderTool()}
@@ -566,15 +553,10 @@ export const Dashboard = () => {
         </div>
       </div>
 
-      {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sign out modal */}
       {showSignOutModal && (
         <SignOutModal onConfirm={handleSignOut} onCancel={() => setShowSignOutModal(false)} />
       )}
