@@ -7,9 +7,10 @@ export const hasSupabaseEnv = true;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
+    autoRefreshToken: true,       // ✅ token auto refresh hoga
+    persistSession: true,          // ✅ session browser mein save rahega
+    detectSessionInUrl: true,      // ✅ reset password link ke liye
+    storageKey: 'axellevault-session',
   },
 });
 
@@ -40,26 +41,15 @@ export const logToolUsage = async (
 };
 
 // ─── Notes ─────────────────────────────────────────────────
-export const saveEncryptedNote = async (
-  userId: string,
-  content: string,
-  iv: string,
-  salt: string
-) => {
-  const result = await supabase
-    .from('notesvault')
-    .insert({ user_id: userId, type: 'note', content, iv, salt });
+export const saveEncryptedNote = async (userId: string, content: string, iv: string, salt: string) => {
+  const result = await supabase.from('notesvault').insert({ user_id: userId, type: 'note', content, iv, salt });
   if (result.error) console.error('[Supabase] saveEncryptedNote error:', result.error.message);
   return result;
 };
 
 export const fetchEncryptedNotes = async (userId: string) => {
-  const result = await supabase
-    .from('notesvault')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('type', 'note')
-    .order('created_at', { ascending: false });
+  const result = await supabase.from('notesvault').select('*')
+    .eq('user_id', userId).eq('type', 'note').order('created_at', { ascending: false });
   if (result.error) console.error('[Supabase] fetchEncryptedNotes error:', result.error.message);
   return result;
 };
@@ -71,11 +61,7 @@ export const deleteEncryptedNote = async (noteId: string) => {
 };
 
 export const deleteAllUserNotes = async (userId: string) => {
-  const result = await supabase
-    .from('notesvault')
-    .delete()
-    .eq('user_id', userId)
-    .eq('type', 'note');
+  const result = await supabase.from('notesvault').delete().eq('user_id', userId).eq('type', 'note');
   if (result.error) console.error('[Supabase] deleteAllUserNotes error:', result.error.message);
   return result;
 };
@@ -83,42 +69,25 @@ export const deleteAllUserNotes = async (userId: string) => {
 // ─── PIN ───────────────────────────────────────────────────
 export const savePinHash = async (userId: string, pinHash: string, maxRetries = 3) => {
   let lastError: any = null;
-
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const { data: existing } = await supabase
-        .from('notesvault')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('type', 'pin')
-        .maybeSingle();
-
+      const { data: existing } = await supabase.from('notesvault')
+        .select('id').eq('user_id', userId).eq('type', 'pin').maybeSingle();
       let result;
       if (existing?.id) {
-        result = await supabase
-          .from('notesvault')
-          .update({ pin_hash: pinHash })
-          .eq('id', existing.id);
+        result = await supabase.from('notesvault').update({ pin_hash: pinHash }).eq('id', existing.id);
       } else {
-        result = await supabase
-          .from('notesvault')
-          .insert({ user_id: userId, type: 'pin', pin_hash: pinHash });
+        result = await supabase.from('notesvault').insert({ user_id: userId, type: 'pin', pin_hash: pinHash });
       }
-
       if (result.error) {
         lastError = result.error;
-        if (attempt < maxRetries - 1) {
-          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 100));
-          continue;
-        }
+        if (attempt < maxRetries - 1) { await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 100)); continue; }
         console.error('[Supabase] savePinHash error:', result.error.message);
       }
       return result;
     } catch (err) {
       lastError = err;
-      if (attempt < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 100));
-      }
+      if (attempt < maxRetries - 1) await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 100));
     }
   }
   return { error: lastError };
@@ -126,26 +95,17 @@ export const savePinHash = async (userId: string, pinHash: string, maxRetries = 
 
 export const fetchPinHash = async (userId: string) => {
   try {
-    const result = await supabase
-      .from('notesvault')
-      .select('id, pin_hash')
-      .eq('user_id', userId)
-      .eq('type', 'pin')
-      .maybeSingle();
+    const result = await supabase.from('notesvault')
+      .select('id, pin_hash').eq('user_id', userId).eq('type', 'pin').maybeSingle();
     if (result.error) console.error('[Supabase] fetchPinHash error:', result.error.message);
     return result;
   } catch (err) {
-    console.error('[Supabase] fetchPinHash exception:', err);
     return { data: null, error: { message: 'Exception fetching PIN hash' } };
   }
 };
 
 export const deletePinHash = async (userId: string) => {
-  const result = await supabase
-    .from('notesvault')
-    .delete()
-    .eq('user_id', userId)
-    .eq('type', 'pin');
+  const result = await supabase.from('notesvault').delete().eq('user_id', userId).eq('type', 'pin');
   if (result.error) console.error('[Supabase] deletePinHash error:', result.error.message);
   return result;
 };
