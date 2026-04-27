@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { User, Shield, CheckCircle, Info, CreditCard as Edit3 } from 'lucide-react';
+import { User, Shield, CheckCircle, Info, Edit3 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../contexts/ToastContext';
 
