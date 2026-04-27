@@ -6,7 +6,6 @@ import { Settings } from './components/Settings';
 import { ForgotPassword } from './components/ForgotPassword';
 import { ResetPassword } from './components/ResetPassword';
 import { useAuth } from './hooks/useAuth';
-import { ToastProvider } from './contexts/ToastContext';
 
 import IPChat from './components/tools/ipchat';
 import DarkWebExposureChecker from './components/tools/DarkWebExposureChecker';
@@ -57,31 +56,29 @@ const ForgotPage = () => {
 // ─── App ──────────────────────────────────────────────────
 function App() {
   return (
-    <ToastProvider>
-      <Routes>
-        {/* Root → dashboard (AuthGate handle karega redirect) */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+    <Routes>
+      {/* Root → dashboard (AuthGate handle karega redirect) */}
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-        {/* Public routes */}
-        <Route path="/login"          element={<PublicOnly><LoginPage /></PublicOnly>} />
-        <Route path="/forgot-password" element={<PublicOnly><ForgotPage /></PublicOnly>} />
-        <Route path="/reset-password"  element={<ResetPassword />} />
+      {/* Public routes */}
+      <Route path="/login"          element={<PublicOnly><LoginPage /></PublicOnly>} />
+      <Route path="/forgot-password" element={<PublicOnly><ForgotPage /></PublicOnly>} />
+      <Route path="/reset-password"  element={<ResetPassword />} />
 
-        {/* Protected routes */}
-        <Route path="/dashboard" element={<AuthGate><Dashboard /></AuthGate>} />
-        <Route path="/profile"   element={<AuthGate><Profile /></AuthGate>} />
-        <Route path="/settings"  element={<AuthGate><Settings /></AuthGate>} />
+      {/* Protected routes */}
+      <Route path="/dashboard" element={<AuthGate><Dashboard /></AuthGate>} />
+      <Route path="/profile"   element={<AuthGate><Profile /></AuthGate>} />
+      <Route path="/settings"  element={<AuthGate><Settings /></AuthGate>} />
 
-        {/* Tools */}
-        <Route path="/tools"           element={<AuthGate><Navigate to="/tools/ipchat" replace /></AuthGate>} />
-        <Route path="/tools/ipchat"    element={<AuthGate><IPChat /></AuthGate>} />
-        <Route path="/tools/darkweb"   element={<AuthGate><DarkWebExposureChecker /></AuthGate>} />
-        <Route path="/tools/:toolId"   element={<AuthGate><Dashboard /></AuthGate>} />
+      {/* Tools */}
+      <Route path="/tools"           element={<AuthGate><Navigate to="/tools/ipchat" replace /></AuthGate>} />
+      <Route path="/tools/ipchat"    element={<AuthGate><IPChat /></AuthGate>} />
+      <Route path="/tools/darkweb"   element={<AuthGate><DarkWebExposureChecker /></AuthGate>} />
+      <Route path="/tools/:toolId"   element={<AuthGate><Dashboard /></AuthGate>} />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </ToastProvider>
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
   );
 }
 
