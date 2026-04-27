@@ -1,8 +1,5 @@
 import { useState, useEffect } from 'react';
-import {
-  Shield, Mail, Lock, Eye, EyeOff, AlertCircle,
-  ArrowRight, Fingerprint, Check
-} from 'lucide-react';
+import { Shield, Mail, Lock, Eye, EyeOff, CircleAlert as AlertCircle, ArrowRight, FingerprintPattern as Fingerprint, Check } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../contexts/ToastContext';
 import { hasSupabaseEnv } from '../lib/supabase';
