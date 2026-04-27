@@ -184,23 +184,23 @@ const LoginForm = ({ onForgotPassword, onSwitchToSignup }: {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {error && (
-        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs animate-in shake duration-500">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 animate-pulse" /> {error}
         </div>
       )}
 
       {/* Email */}
       <div className="space-y-1.5">
         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Email Address</label>
-        <div className="relative">
-          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+        <div className="relative group">
+          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
           <input
             type="email" value={email} onChange={e => setEmail(e.target.value)} required
             placeholder="your@email.com"
-            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all hover:border-white/20"
           />
           {email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center">
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center animate-pulse">
               <Check className="w-2.5 h-2.5 text-green-400" />
             </div>
           )}
@@ -210,16 +210,16 @@ const LoginForm = ({ onForgotPassword, onSwitchToSignup }: {
       {/* Password */}
       <div className="space-y-1.5">
         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Password</label>
-        <div className="relative">
-          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+        <div className="relative group">
+          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
           <input
             type={showPass ? 'text' : 'password'} value={password}
             onChange={e => setPassword(e.target.value)} required
             placeholder="Enter your password"
-            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-10 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-10 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all hover:border-white/20"
           />
           <button type="button" onClick={() => setShowPass(!showPass)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 transition-colors">
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 transition-colors duration-200">
             {showPass ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
           </button>
         </div>
@@ -227,37 +227,40 @@ const LoginForm = ({ onForgotPassword, onSwitchToSignup }: {
 
       {/* Remember me + Forgot */}
       <div className="flex items-center justify-between">
-        <label className="flex items-center gap-2 cursor-pointer select-none">
+        <label className="flex items-center gap-2 cursor-pointer select-none group">
           <div
             onClick={() => setRememberMe(!rememberMe)}
-            className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all ${rememberMe ? 'bg-cyan-500 border-cyan-500' : 'border-gray-600 hover:border-cyan-500/50'}`}>
-            {rememberMe && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+            className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all duration-200 ${rememberMe ? 'bg-cyan-500 border-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.3)]' : 'border-gray-600 hover:border-cyan-500/50 group-hover:border-cyan-500/50'}`}>
+            {rememberMe && <svg className="w-2.5 h-2.5 text-white animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
           </div>
-          <span className="text-xs text-gray-400">Remember me</span>
+          <span className="text-xs text-gray-400 group-hover:text-gray-300 transition-colors">Remember me</span>
         </label>
         <button type="button" onClick={onForgotPassword}
-          className="text-xs text-cyan-500 hover:text-cyan-300 transition-colors">
+          className="text-xs text-cyan-500 hover:text-cyan-300 transition-colors duration-200 relative after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-cyan-400 after:transition-all hover:after:w-full">
           Forgot password?
         </button>
       </div>
 
       {/* Submit */}
       <button type="submit" disabled={loading}
-        className="w-full py-3.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+        className="w-full py-3.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 hover:scale-105 active:scale-95 duration-200 relative overflow-hidden group"
         style={{
           background: 'linear-gradient(135deg, #0891b2, #059669)',
           boxShadow: loading ? 'none' : '0 0 25px rgba(6,182,212,0.3)',
         }}>
-        {loading ? (
-          <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Signing in...</>
-        ) : (
-          <><Fingerprint className="w-4 h-4" /> Sign In <ArrowRight className="w-4 h-4" /></>
-        )}
+        <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+        <div className="relative z-10 flex items-center gap-2">
+          {loading ? (
+            <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Signing in...</>
+          ) : (
+            <><Fingerprint className="w-4 h-4" /> Sign In <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" /></>
+          )}
+        </div>
       </button>
 
       <p className="text-center text-xs text-gray-500">
         Don't have an account?{' '}
-        <button type="button" onClick={onSwitchToSignup} className="text-cyan-400 font-semibold hover:text-cyan-300 transition-colors">
+        <button type="button" onClick={onSwitchToSignup} className="text-cyan-400 font-semibold hover:text-cyan-300 transition-colors duration-200 relative after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-cyan-300 after:transition-all hover:after:w-full">
           Create one →
         </button>
       </p>
@@ -314,8 +317,8 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
 
   if (success) {
     return (
-      <div className="text-center py-6 space-y-5">
-        <div className="w-16 h-16 rounded-full bg-green-500/10 border border-green-500/30 flex items-center justify-center mx-auto">
+      <div className="text-center py-6 space-y-5 animate-in fade-in duration-500">
+        <div className="w-16 h-16 rounded-full bg-green-500/10 border border-green-500/30 flex items-center justify-center mx-auto animate-pulse">
           <Check className="w-8 h-8 text-green-400" />
         </div>
         <div>
@@ -324,9 +327,12 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
         </div>
         <button
           onClick={onSwitchToLogin}
-          className="w-full py-3.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-all"
+          className="w-full py-3.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-all hover:scale-105 active:scale-95 duration-200 relative overflow-hidden group"
           style={{ background: 'linear-gradient(135deg, #0891b2, #059669)', boxShadow: '0 0 25px rgba(6,182,212,0.3)' }}>
-          <Fingerprint className="w-4 h-4" /> Sign In Now <ArrowRight className="w-4 h-4" />
+          <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+          <div className="relative z-10 flex items-center gap-2">
+            <Fingerprint className="w-4 h-4" /> Sign In Now <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+          </div>
         </button>
       </div>
     );
@@ -335,20 +341,20 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {error && (
-        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs animate-in shake duration-500">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 animate-pulse" /> {error}
         </div>
       )}
 
       {/* Username */}
       <div className="space-y-1.5">
         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Username</label>
-        <div className="relative">
-          <Shield className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+        <div className="relative group">
+          <Shield className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
           <input
             type="text" value={username} onChange={e => setUsername(e.target.value)} required
             placeholder="Choose a username"
-            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all hover:border-white/20"
           />
         </div>
       </div>
@@ -356,12 +362,12 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
       {/* Email */}
       <div className="space-y-1.5">
         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Email Address</label>
-        <div className="relative">
-          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+        <div className="relative group">
+          <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
           <input
             type="email" value={email} onChange={e => setEmail(e.target.value)} required
             placeholder="your@email.com"
-            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all hover:border-white/20"
           />
         </div>
       </div>
@@ -369,29 +375,29 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
       {/* Password */}
       <div className="space-y-1.5">
         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Password</label>
-        <div className="relative">
-          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+        <div className="relative group">
+          <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
           <input
             type={showPass ? 'text' : 'password'} value={password}
             onChange={e => setPassword(e.target.value)} required
             placeholder="Min. 8 characters"
-            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-10 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+            className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-10 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all hover:border-white/20"
           />
           <button type="button" onClick={() => setShowPass(!showPass)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 transition-colors">
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-cyan-400 transition-colors duration-200">
             {showPass ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
           </button>
         </div>
         {/* Strength bar */}
         {password && (
-          <div className="space-y-1">
+          <div className="space-y-1 animate-in fade-in duration-300">
             <div className="flex gap-1">
               {[0,1,2,3].map(i => (
                 <div key={i} className="flex-1 h-1 rounded-full transition-all duration-300"
                   style={{ backgroundColor: i < strength ? strengthColor[strength] : '#1f2937' }} />
               ))}
             </div>
-            <p className="text-[10px] font-mono" style={{ color: strengthColor[strength] || '#6b7280' }}>
+            <p className="text-[10px] font-mono font-semibold transition-colors duration-300" style={{ color: strengthColor[strength] || '#6b7280' }}>
               {strength > 0 ? `${strengthLabel[strength]} password` : 'Too weak'}
             </p>
           </div>
@@ -400,21 +406,24 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
 
       {/* Submit */}
       <button type="submit" disabled={loading}
-        className="w-full py-3.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+        className="w-full py-3.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 hover:scale-105 active:scale-95 duration-200 relative overflow-hidden group"
         style={{
           background: 'linear-gradient(135deg, #0891b2, #059669)',
           boxShadow: loading ? 'none' : '0 0 25px rgba(6,182,212,0.3)',
         }}>
-        {loading ? (
-          <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Creating account...</>
-        ) : (
-          <><Shield className="w-4 h-4" /> Create Account <ArrowRight className="w-4 h-4" /></>
-        )}
+        <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+        <div className="relative z-10 flex items-center gap-2">
+          {loading ? (
+            <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Creating account...</>
+          ) : (
+            <><Shield className="w-4 h-4" /> Create Account <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" /></>
+          )}
+        </div>
       </button>
 
       <p className="text-center text-xs text-gray-500">
         Already have an account?{' '}
-        <button type="button" onClick={onSwitchToLogin} className="text-cyan-400 font-semibold hover:text-cyan-300 transition-colors">
+        <button type="button" onClick={onSwitchToLogin} className="text-cyan-400 font-semibold hover:text-cyan-300 transition-colors duration-200 relative after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-cyan-300 after:transition-all hover:after:w-full">
           Sign in →
         </button>
       </p>
@@ -503,12 +512,13 @@ export const Login = ({ onForgotPassword, onToggleMode: _onToggleMode }: LoginPr
             <div className="flex gap-1 bg-black/40 border border-white/8 rounded-xl p-1 mb-7">
               {(['login', 'signup'] as Mode[]).map(m => (
                 <button key={m} onClick={() => setMode(m)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-200 ${
+                  className={`flex-1 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all duration-200 relative ${
                     mode === m
                       ? 'bg-cyan-600 text-white shadow-[0_0_12px_rgba(6,182,212,0.3)]'
                       : 'text-gray-500 hover:text-gray-300'
                   }`}>
                   {m === 'login' ? 'Sign In' : 'Sign Up'}
+                  {mode === m && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-400 to-cyan-600 rounded-full" />}
                 </button>
               ))}
             </div>
