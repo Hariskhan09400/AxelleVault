@@ -1,8 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import {
-  Shield, Mail, Lock, Eye, EyeOff, AlertCircle,
-  ArrowRight, Fingerprint, Check, Menu, X, ChevronRight
-} from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Shield, Mail, Lock, Eye, EyeOff, CircleAlert as AlertCircle, ArrowRight, FingerprintPattern as Fingerprint, Check } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../contexts/ToastContext';
 import { hasSupabaseEnv } from '../lib/supabase';
@@ -146,16 +143,31 @@ const LoginForm = ({ onForgotPassword, onSwitchToSignup }: {
     if (saved) { setEmail(saved); setRememberMe(true); }
   }, []);
 
+  const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasSupabaseEnv) { setError('Service not configured.'); return; }
+
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+
+    if (!trimmedEmail || !trimmedPassword) {
+      setError('Please fill in all fields.');
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
     setError('');
     setLoading(true);
 
-    if (rememberMe) localStorage.setItem('av_remembered_email', email);
+    if (rememberMe) localStorage.setItem('av_remembered_email', trimmedEmail);
     else localStorage.removeItem('av_remembered_email');
 
-    const { error: authError } = await signIn(email, password);
+    const { error: authError } = await signIn(trimmedEmail, trimmedPassword);
 
     if (authError) {
       setError('Wrong email or password. Please try again.');
@@ -184,7 +196,7 @@ const LoginForm = ({ onForgotPassword, onSwitchToSignup }: {
             placeholder="your@email.com"
             className="w-full bg-black/40 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all"
           />
-          {email && (
+          {email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && (
             <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-green-500/20 border border-green-500/40 flex items-center justify-center">
               <Check className="w-2.5 h-2.5 text-green-400" />
             </div>
@@ -268,11 +280,24 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasSupabaseEnv) { setError('Service not configured.'); return; }
+
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim();
+
+    if (!trimmedUsername || !trimmedEmail || !password) {
+      setError('Please fill in all fields.');
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+
     setError('');
     setLoading(true);
 
-    const { error: authError } = await signUp(email, password, username);
+    const { error: authError } = await signUp(trimmedEmail, password, trimmedUsername);
 
     if (authError) {
       setError(authError.message ?? 'Something went wrong. Please try again.');
@@ -397,13 +422,8 @@ const SignupForm = ({ onSwitchToLogin }: { onSwitchToLogin: () => void }) => {
 // ═══════════════════════════════════════════════════════════
 // MAIN EXPORT
 // ═══════════════════════════════════════════════════════════
-export const Login = ({ onToggleMode, onForgotPassword }: LoginProps) => {
+export const Login = ({ onForgotPassword, onToggleMode: _onToggleMode }: LoginProps) => {
   const [mode, setMode] = useState<Mode>('login');
-
-  // Sync with parent when mode changes
-  useEffect(() => {
-    // Parent's onToggleMode handles external routing if needed
-  }, [mode]);
 
   return (
     <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4 relative">
